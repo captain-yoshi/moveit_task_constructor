@@ -56,6 +56,10 @@ GenerateGraspPose::GenerateGraspPose(const std::string& name) : GeneratePose(nam
 
 	p.declare<boost::any>("pregrasp", "pregrasp posture");
 	p.declare<boost::any>("grasp", "grasp posture");
+	p.declare<Eigen::Isometry3d>("object_pose", Eigen::Isometry3d::Identity(), "pose");
+
+	p.declare<bool>("ignore_collisions", false);
+
 }
 
 void GenerateGraspPose::init(const core::RobotModelConstPtr& robot_model) {
@@ -83,8 +87,8 @@ void GenerateGraspPose::init(const core::RobotModelConstPtr& robot_model) {
 		const moveit::core::JointModelGroup* jmg = robot_model->getEndEffector(eef);
 		const std::string& name = props.get<std::string>("pregrasp");
 		std::map<std::string, double> m;
-		if (!jmg->getVariableDefaultPositions(name, m))
-			errors.push_back(*this, "unknown end effector pose: " + name);
+		//if (!jmg->getVariableDefaultPositions(name, m))
+		//	errors.push_back(*this, "unknown end effector pose: " + name);
 	}
 
 	if (errors)
@@ -117,6 +121,9 @@ void GenerateGraspPose::compute() {
 		return;
 	planning_scene::PlanningScenePtr scene = upstream_solutions_.pop()->end()->scene()->diff();
 
+
+
+
 	// set end effector pose
 	const auto& props = properties();
 	const std::string& eef = props.get<std::string>("eef");
@@ -128,11 +135,39 @@ void GenerateGraspPose::compute() {
 	geometry_msgs::PoseStamped target_pose_msg;
 	target_pose_msg.header.frame_id = props.get<std::string>("object");
 
-	double current_angle_ = 0.0;
+  Eigen::Isometry3d default_pose = props.get<Eigen::Isometry3d>("object_pose");
+
+	// allowCollisioins
+	bool ignore_collisions = props.get<bool>("ignore_collisions");
+
+	if (ignore_collisions) {
+		const auto& links = jmg->getLinkModelNamesWithCollisionGeometry();
+		if (!links.empty()) {
+			struct CollisionMatrixPairs
+			{
+				std::vector<std::string> first;
+				std::vector<std::string> second;
+				bool allow;
+			};
+			bool invert = false;
+			
+			CollisionMatrixPairs pairs({ std::vector<std::string>({target_pose_msg.header.frame_id}), links, true });
+
+			collision_detection::AllowedCollisionMatrix& acm = scene->getAllowedCollisionMatrixNonConst();
+			bool allow = invert ? !pairs.allow : pairs.allow;
+			if (pairs.second.empty()) {
+				for (const auto& name : pairs.first)
+					acm.setEntry(name, allow);
+			} else
+				acm.setEntry(pairs.first, pairs.second, allow);
+		}
+	}
+  	double current_angle_ = 0.0;
 	while (current_angle_ < 2. * M_PI && current_angle_ > -2. * M_PI) {
 		// rotate object pose about z-axis
-		Eigen::Isometry3d target_pose(Eigen::AngleAxisd(current_angle_, Eigen::Vector3d::UnitZ()));
-		current_angle_ += props.get<double>("angle_delta");
+		//Eigen::Isometry3d target_pose(Eigen::AngleAxisd(current_angle_, Eigen::Vector3d::UnitZ()));
+    Eigen::Isometry3d target_pose = default_pose * Eigen::AngleAxisd(current_angle_, Eigen::Vector3d::UnitX());
+    current_angle_ += props.get<double>("angle_delta");
 
 		InterfaceState state(scene);
 		tf::poseEigenToMsg(target_pose, target_pose_msg.pose);

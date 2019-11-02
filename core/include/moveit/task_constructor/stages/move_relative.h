@@ -88,6 +88,8 @@ public:
 		setProperty("path_constraints", std::move(path_constraints));
 	}
 
+    void setPoseOffset(const Eigen::Isometry3d pose) {setProperty("frame_pose_offset", pose);};
+
 	/// perform twist motion on specified link
 	void setDirection(const geometry_msgs::TwistStamped& twist) { setProperty("direction", twist); }
 	/// translate link along given direction
