@@ -76,6 +76,9 @@ public:
 	}
 	void setIKFrame(const std::string& link) { setIKFrame(Eigen::Isometry3d::Identity(), link); }
 
+	/// set frame transform
+    void setPoseTransform(const Eigen::Isometry3d& pose_transform) { setProperty("pose_transform", pose_transform); }
+
 	/// set minimum / maximum distance to move
 	void setMinDistance(double distance) { setProperty("min_distance", distance); }
 	void setMaxDistance(double distance) { setProperty("max_distance", distance); }
