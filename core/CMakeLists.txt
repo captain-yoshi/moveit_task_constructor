@@ -33,6 +33,16 @@ else ()
 	set(CMAKE_CXX_STANDARD 14)
 endif ()
 
+# check for MOVEIT_MASTER
+include(CheckIncludeFileCXX)
+set(CMAKE_REQUIRED_INCLUDES ${moveit_core_INCLUDE_DIRS})
+set(CMAKE_REQUIRED_FLAGS "-std=c++11")
+CHECK_INCLUDE_FILE_CXX(moveit/collision_detection/collision_env.h MOVEIT_MASTER)
+if(NOT MOVEIT_MASTER)
+  set(MOVEIT_MASTER 0)
+endif()
+add_definitions(-DMOVEIT_MASTER=${MOVEIT_MASTER})
+
 set(PROJECT_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/include/moveit/task_constructor)
 
 add_subdirectory(src)
