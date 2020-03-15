@@ -126,6 +126,7 @@ public:
 	}
 	/// conveniency method accepting std::string and JointModelGroup
 	void allowCollisions(const std::string& first, const moveit::core::JointModelGroup& jmg, bool allow);
+	void removeCollisionObjects(const std::vector<std::string>& ids);
 
 protected:
 	// list of objects to attach (true) / detach (false) to a given link
@@ -139,6 +140,7 @@ protected:
 		bool allow;
 	};
 	std::list<CollisionMatrixPairs> collision_matrix_edits_;
+	std::vector<std::string> remove_collision_object_ids_;
 	ApplyCallback callback_;
 
 protected:
@@ -147,6 +149,7 @@ protected:
 	void attachObjects(planning_scene::PlanningScene& scene, const std::pair<std::string, std::pair<Names, bool>>& pair,
 	                   bool invert);
 	void allowCollisions(planning_scene::PlanningScene& scene, const CollisionMatrixPairs& pairs, bool invert);
+	void removeCollisionObjects(planning_scene::PlanningScene& scene, const std::string& id);
 };
 
 inline void ModifyPlanningScene::attachObject(const std::string& object, const std::string& link) {

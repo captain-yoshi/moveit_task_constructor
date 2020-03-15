@@ -63,6 +63,10 @@ void ModifyPlanningScene::allowCollisions(const std::string& first, const moveit
 		allowCollisions(Names({ first }), links, allow);
 }
 
+void ModifyPlanningScene::removeCollisionObjects(const std::vector<std::string>& ids) {
+	remove_collision_object_ids_.insert(remove_collision_object_ids_.end(), ids.begin(), ids.end());
+}
+
 void ModifyPlanningScene::computeForward(const InterfaceState& from) {
 	sendForward(from, apply(from, false), SubTrajectory());
 }
@@ -97,6 +101,14 @@ void ModifyPlanningScene::allowCollisions(planning_scene::PlanningScene& scene, 
 		acm.setEntry(pairs.first, pairs.second, allow);
 }
 
+void ModifyPlanningScene::removeCollisionObjects(planning_scene::PlanningScene& scene, const std::string& id) {
+	//getCollisionObjectMsg(moveit_msgs::CollisionObject& collision_obj, const std::string& ns) const
+	moveit_msgs::CollisionObject obj;
+	obj.id = id;
+	obj.operation = moveit_msgs::CollisionObject::REMOVE;
+	scene.processCollisionObjectMsg(obj);
+}
+
 // invert indicates, whether to detach instead of attach (and vice versa)
 // as well as to forbid instead of allow collision (and vice versa)
 InterfaceState ModifyPlanningScene::apply(const InterfaceState& from, bool invert) {
@@ -110,6 +122,10 @@ InterfaceState ModifyPlanningScene::apply(const InterfaceState& from, bool inver
 	// allow/forbid collisions
 	for (const auto& pairs : collision_matrix_edits_)
 		allowCollisions(*scene, pairs, invert);
+
+	// remove collisionObject
+	for (const auto& obj : remove_collision_object_ids_)
+		removeCollisionObjects(*scene, obj);
 
 	if (callback_)
 		callback_(scene, properties());

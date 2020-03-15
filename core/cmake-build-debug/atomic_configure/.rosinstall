@@ -1,2 +1,0 @@
-- setup-file:
-    local-name: /home/bob/ws/ros/catkin_ws/src/moveit_task_constructor/core/cmake-build-debug/devel/setup.sh
