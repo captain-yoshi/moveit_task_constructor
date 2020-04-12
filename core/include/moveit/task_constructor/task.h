@@ -82,9 +82,9 @@ public:
 	     ContainerBase::pointer&& container = std::make_unique<SerialContainer>("task pipeline"));
 	Task(Task&& other);
 	Task& operator=(Task&& other);
-	~Task();
+	~Task() override;
 
-	std::string id() const;
+	const std::string& id() const;
 
 	const moveit::core::RobotModelConstPtr& getRobotModel() const;
 	/// setting the robot model also resets the task
@@ -92,8 +92,8 @@ public:
 	/// load robot model from given parameter
 	void loadRobotModel(const std::string& robot_description = "robot_description");
 
-	// TODO: use Stage::insert as well?
 	void add(Stage::pointer&& stage);
+	bool insert(Stage::pointer&& stage, int before = -1) override;
 	void clear() final;
 
 	/// enable introspection publishing for use with rviz
@@ -105,7 +105,7 @@ public:
 	/// add function to be called after each top-level iteration
 	TaskCallbackList::const_iterator addTaskCallback(TaskCallback&& cb);
 	/// remove function callback
-	void erase(TaskCallbackList::const_iterator which);
+	void eraseTaskCallback(TaskCallbackList::const_iterator which);
 
 	/// expose SolutionCallback API
 	using WrapperBase::SolutionCallback;
