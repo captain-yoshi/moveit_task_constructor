@@ -47,6 +47,7 @@
 #include <moveit/task_constructor/stages/compute_ik.h>
 #include <moveit/task_constructor/stages/connect.h>
 #include <moveit/task_constructor/stages/current_state.h>
+#include <moveit/task_constructor/stages/generate_insert_pose.h>
 #include <moveit/task_constructor/stages/generate_grasp_pose.h>
 #include <moveit/task_constructor/stages/generate_pose.h>
 #include <moveit/task_constructor/stages/generate_place_pose.h>
@@ -121,4 +122,4 @@ private:
 	geometry_msgs::Pose place_pose_;
 	double place_surface_offset_;
 };
-}  // moveit_task_constructor_demo
+}  // namespace moveit_task_constructor_demo

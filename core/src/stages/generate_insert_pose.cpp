@@ -34,7 +34,7 @@
 
 /* Authors: Robert Haschke, Michael Goerner */
 
-#include <moveit/task_constructor/stages/generate_grasp_pose.h>
+#include <moveit/task_constructor/stages/generate_insert_pose.h>
 #include <moveit/task_constructor/storage.h>
 #include <moveit/task_constructor/marker_tools.h>
 #include <rviz_marker_tools/marker_creation.h>
@@ -48,17 +48,17 @@ namespace moveit {
 namespace task_constructor {
 namespace stages {
 
-GenerateGraspPose::GenerateGraspPose(const std::string& name) : GeneratePose(name) {
+GenerateInsertPose::GenerateInsertPose(const std::string& name) : GeneratePose(name) {
 	auto& p = properties();
 	p.declare<std::string>("eef", "name of end-effector");
 	p.declare<std::string>("object");
+	p.declare<Eigen::Isometry3d>("object_pose_transform", Eigen::Isometry3d::Identity(),
+	                             "pose transform wrt object mesh origin");
 	p.declare<double>("angle_delta", 0.1, "angular steps (rad)");
-
-	p.declare<boost::any>("pregrasp", "pregrasp posture");
-	p.declare<boost::any>("grasp", "grasp posture");
+	p.declare<Eigen::Vector3d>("axis", Eigen::Vector3d::UnitZ(), "axis for angular steps wrt object");
 }
 
-void GenerateGraspPose::init(const core::RobotModelConstPtr& robot_model) {
+void GenerateInsertPose::init(const core::RobotModelConstPtr& robot_model) {
 	InitStageException errors;
 	try {
 		GeneratePose::init(robot_model);
@@ -78,29 +78,22 @@ void GenerateGraspPose::init(const core::RobotModelConstPtr& robot_model) {
 	const std::string& eef = props.get<std::string>("eef");
 	if (!robot_model->hasEndEffector(eef))
 		errors.push_back(*this, "unknown end effector: " + eef);
-
-	else if (props.property("pregrasp").defined()) {
-		// check availability of eef pose			// if pregrasp pose is defined, check if it's valid
+	else {
+		// check availability of eef pose
+		/*
 		const moveit::core::JointModelGroup* jmg = robot_model->getEndEffector(eef);
-		const moveit::core::JointModelGroup* eef_jmg = robot_model->getEndEffector(eef);
 		const std::string& name = props.get<std::string>("pregrasp");
-		const boost::any& pregrasp_prop = props.get("pregrasp");
 		std::map<std::string, double> m;
-		if (pregrasp_prop.type() == typeid(std::string)) {
-			if (!jmg->getVariableDefaultPositions(name, m))  // check if the specified pregrasp pose is a valid named
-			                                                 // target
-				errors.push_back(*this, "unknown end effector pose: " + name);
-			const auto& pregrasp_name = boost::any_cast<std::string>(pregrasp_prop);
-			std::map<std::string, double> m;
-			if (!eef_jmg->getVariableDefaultPositions(pregrasp_name, m))
-				errors.push_back(*this, "pregrasp is set to unknown end effector pose: " + pregrasp_name);
-		}
+		if (!jmg->getVariableDefaultPositions(name, m))
+		   errors.push_back(*this, "unknown end effector pose: " + name);
+		*/
 	}
+
 	if (errors)
 		throw errors;
 }
 
-void GenerateGraspPose::onNewSolution(const SolutionBase& s) {
+void GenerateInsertPose::onNewSolution(const SolutionBase& s) {
 	planning_scene::PlanningSceneConstPtr scene = s.end()->scene();
 
 	const auto& props = properties();
@@ -114,14 +107,14 @@ void GenerateGraspPose::onNewSolution(const SolutionBase& s) {
 			solution.setComment(msg);
 			spawn(std::move(state), std::move(solution));
 		} else
-			ROS_WARN_STREAM_NAMED("GenerateGraspPose", msg);
+			ROS_WARN_STREAM_NAMED("GenerateInsertPose", msg);
 		return;
 	}
 
 	upstream_solutions_.push(&s);
 }
 
-void GenerateGraspPose::compute() {
+void GenerateInsertPose::compute() {
 	if (upstream_solutions_.empty())
 		return;
 	planning_scene::PlanningScenePtr scene = upstream_solutions_.pop()->end()->scene()->diff();
@@ -131,29 +124,28 @@ void GenerateGraspPose::compute() {
 	const std::string& eef = props.get<std::string>("eef");
 	const moveit::core::JointModelGroup* jmg = scene->getRobotModel()->getEndEffector(eef);
 
-	robot_state::RobotState& robot_state = scene->getCurrentStateNonConst();
-	robot_state.setToDefaultValues(jmg, props.get<std::string>("pregrasp"));
-
 	geometry_msgs::PoseStamped target_pose_msg;
 	target_pose_msg.header.frame_id = props.get<std::string>("object");
+
+	Eigen::Vector3d axis = props.get<Eigen::Vector3d>("axis");
+	Eigen::Isometry3d object_pose_transform = props.get<Eigen::Isometry3d>("object_pose_transform");
 
 	double current_angle_ = 0.0;
 	while (current_angle_ < 2. * M_PI && current_angle_ > -2. * M_PI) {
 		// rotate object pose about z-axis
-		Eigen::Isometry3d target_pose(Eigen::AngleAxisd(current_angle_, Eigen::Vector3d::UnitZ()));
+		Eigen::Isometry3d target_pose(object_pose_transform * Eigen::AngleAxisd(current_angle_, axis));
 		current_angle_ += props.get<double>("angle_delta");
 
 		InterfaceState state(scene);
 		tf::poseEigenToMsg(target_pose, target_pose_msg.pose);
 		state.properties().set("target_pose", target_pose_msg);
-		props.exposeTo(state.properties(), { "pregrasp", "grasp" });
 
 		SubTrajectory trajectory;
 		trajectory.setCost(0.0);
 		trajectory.setComment(std::to_string(current_angle_));
 
 		// add frame at target pose
-		rviz_marker_tools::appendFrame(trajectory.markers(), target_pose_msg, 0.1, "grasp frame");
+		rviz_marker_tools::appendFrame(trajectory.markers(), target_pose_msg, 0.1, "insert frame");
 
 		spawn(std::move(state), std::move(trajectory));
 	}

@@ -2,10 +2,10 @@
 max_solutions: 10
 
 # Planning group and link names
-arm_group_name: "panda_arm"
-eef_name: "hand"
+arm_group_name: "manipulator"
+eef_name: "moveit_ee"
 hand_group_name: "hand"
-hand_frame: "panda_link8"
+hand_frame: "ee_link"
 
 # Poses
 hand_open_pose: "open"
@@ -22,13 +22,13 @@ surface_link: "table"
 # CYLINDER object specifications
 object_name: "object"
 object_dimensions: [0.25, 0.02] # [height, radius]
-object_pose: [0.5, -0.25, 0.0, 0, 0, 0]
+object_pose: [0, 0.5, 0.0, 0, 0, 0]
 
 # Table model
 spawn_table: true
 table_name: "table"
 table_dimensions: [0.4, 0.5, 0.1]  # [length, width, height]
-table_pose: [0.5, -0.25, 0, 0, 0, 0]
+table_pose: [0, 0.5, 0, 0, 0, 0]
 
 # Gripper grasp frame transform [x,y,z,r,p,y]
 grasp_frame_transform: [0, 0, 0.1, 1.571, 0.785, 1.571]
