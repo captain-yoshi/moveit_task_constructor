@@ -76,6 +76,7 @@ public:
 
 	bool canCompute() const override;
 
+	void compute_();
 	void compute() override;
 
 	void setEndEffector(const std::string& eef) { setProperty("eef", eef); }

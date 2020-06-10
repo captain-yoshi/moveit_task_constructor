@@ -160,7 +160,8 @@ void SubTrajectory::fillMessage(moveit_task_constructor_msgs::Solution& msg, Int
 	if (trajectory())
 		trajectory()->getRobotTrajectoryMsg(t.trajectory);
 
-	this->end()->scene()->getPlanningSceneDiffMsg(t.scene_diff);
+	//this->end()->scene()->getPlanningSceneDiffMsg(t.scene_diff);
+        this->end()->scene()->getPlanningSceneMsg(t.scene_diff);
 }
 
 void SolutionSequence::push_back(const SolutionBase& solution) {

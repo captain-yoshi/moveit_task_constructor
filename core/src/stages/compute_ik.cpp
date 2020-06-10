@@ -96,6 +96,7 @@ bool isTargetPoseColliding(const planning_scene::PlanningScenePtr& scene, Eigen:
 
 	// consider all rigidly connected parent links as well
 	const robot_model::LinkModel* parent = robot_model::RobotModel::getRigidlyConnectedParentLinkModel(link);
+        const auto& considered_target_links = parent->getParentJointModel()->getDescendantLinkModels();
 	if (parent != link)  // transform pose into pose suitable to place parent
 		pose = pose * robot_state.getGlobalLinkTransform(link).inverse() * robot_state.getGlobalLinkTransform(parent);
 
@@ -125,7 +126,18 @@ bool isTargetPoseColliding(const planning_scene::PlanningScenePtr& scene, Eigen:
 	req.contacts = (collision_result != nullptr);
 	collision_detection::CollisionResult& res = collision_result ? *collision_result : result;
 	scene->checkCollision(req, res, robot_state, acm);
-	return res.collision;
+	
+	// Only check collisions with target links
+	if (res.collision) {
+		for (const auto& contact : res.contacts) {
+			const auto& colliding_links = contact.first;
+			for (const auto& link : considered_target_links) {
+				if (colliding_links.first == link->getName() || colliding_links.second == link->getName())
+					return true;
+			}
+		}
+	}
+	return false;
 }
 
 std::string listCollisionPairs(const collision_detection::CollisionResult::ContactMap& contacts,
@@ -216,13 +228,8 @@ bool ComputeIK::canCompute() const {
 	return !upstream_solutions_.empty() || WrapperBase::canCompute();
 }
 
-void ComputeIK::compute() {
-	if (WrapperBase::canCompute())
-		WrapperBase::compute();
 
-	if (upstream_solutions_.empty())
-		return;
-
+void ComputeIK::compute_() {
 	const SolutionBase& s = *upstream_solutions_.pop();
 
 	// -1 TODO: this should not be necessary in my opinion: Why do you think so?
@@ -263,7 +270,7 @@ void ComputeIK::compute() {
 	if (target_pose_msg.header.frame_id != sandbox_scene->getPlanningFrame()) {
 		if (!sandbox_scene->knowsFrameTransform(target_pose_msg.header.frame_id)) {
 			ROS_WARN_STREAM_NAMED("ComputeIK",
-			                      "Unknown reference frame for target pose: " << target_pose_msg.header.frame_id);
+				              "Unknown reference frame for target pose: " << target_pose_msg.header.frame_id);
 			return;
 		}
 		// transform target_pose w.r.t. planning frame
@@ -277,7 +284,7 @@ void ComputeIK::compute() {
 	if (value.empty()) {  // property undefined
 		//  determine IK link from eef/group
 		if (!(link = eef_jmg ? robot_model->getLinkModel(eef_jmg->getEndEffectorParentGroup().second) :
-		                       jmg->getOnlyOneEndEffectorTip())) {
+			               jmg->getOnlyOneEndEffectorTip())) {
 			ROS_WARN_STREAM_NAMED("ComputeIK", "Failed to derive IK target link");
 			return;
 		}
@@ -327,8 +334,8 @@ void ComputeIK::compute() {
 		failure_markers.push_back(marker);
 	};
 	const auto& links_to_visualize = moveit::core::RobotModel::getRigidlyConnectedParentLinkModel(link)
-	                                     ->getParentJointModel()
-	                                     ->getDescendantLinkModels();
+		                             ->getParentJointModel()
+		                             ->getDescendantLinkModels();
 	if (colliding) {
 		SubTrajectory solution;
 		generateCollisionMarkers(sandbox_state, appender, links_to_visualize);
@@ -429,6 +436,20 @@ void ComputeIK::compute() {
 		std::copy(failure_markers.begin(), failure_markers.end(), std::back_inserter(solution.markers()));
 
 		spawn(InterfaceState(scene), std::move(solution));
+	}
+}
+
+
+
+void ComputeIK::compute() {
+	if (WrapperBase::canCompute())
+		WrapperBase::compute();
+
+	if (upstream_solutions_.empty())
+		return;
+
+	while(!upstream_solutions_.empty()) {
+		compute_();
 	}
 }
 }

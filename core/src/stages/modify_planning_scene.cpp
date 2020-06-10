@@ -63,8 +63,8 @@ void ModifyPlanningScene::allowCollisions(const std::string& first, const moveit
 		allowCollisions(Names({ first }), links, allow);
 }
 
-void ModifyPlanningScene::removeCollisionObjects(const std::vector<std::string>& ids) {
-	remove_collision_object_ids_.insert(remove_collision_object_ids_.end(), ids.begin(), ids.end());
+void ModifyPlanningScene::setCollisionObjects(const std::vector<moveit_msgs::CollisionObject>& objects) {
+	collision_objects_.insert(collision_objects_.end(), objects.begin(), objects.end());
 }
 
 void ModifyPlanningScene::computeForward(const InterfaceState& from) {
@@ -101,11 +101,8 @@ void ModifyPlanningScene::allowCollisions(planning_scene::PlanningScene& scene, 
 		acm.setEntry(pairs.first, pairs.second, allow);
 }
 
-void ModifyPlanningScene::removeCollisionObjects(planning_scene::PlanningScene& scene, const std::string& id) {
+void ModifyPlanningScene::setCollisionObjects(planning_scene::PlanningScene& scene, const moveit_msgs::CollisionObject& obj) {
 	//getCollisionObjectMsg(moveit_msgs::CollisionObject& collision_obj, const std::string& ns) const
-	moveit_msgs::CollisionObject obj;
-	obj.id = id;
-	obj.operation = moveit_msgs::CollisionObject::REMOVE;
 	scene.processCollisionObjectMsg(obj);
 }
 
@@ -124,8 +121,8 @@ InterfaceState ModifyPlanningScene::apply(const InterfaceState& from, bool inver
 		allowCollisions(*scene, pairs, invert);
 
 	// remove collisionObject
-	for (const auto& obj : remove_collision_object_ids_)
-		removeCollisionObjects(*scene, obj);
+	for (const auto& obj : collision_objects_)
+		setCollisionObjects(*scene, obj);
 
 	if (callback_)
 		callback_(scene, properties());
