@@ -1,2 +1,2 @@
-core/.idea
-core/cmake-build-debug/
+.ccls-cache/
+core/.ccls-cache/
