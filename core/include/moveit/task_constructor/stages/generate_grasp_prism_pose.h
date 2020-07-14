@@ -42,40 +42,45 @@
 #include <Eigen/Geometry>
 
 namespace moveit {
-    namespace task_constructor {
-        namespace stages {
+namespace task_constructor {
+namespace stages {
 
-            class GenerateGraspPrismPose : public GeneratePose
-            {
-            public:
-                GenerateGraspPrismPose(const std::string& name = "generate grasp prism pose");
+class GenerateGraspPrismPose : public GeneratePose
+{
+public:
+	GenerateGraspPrismPose(const std::string& name = "generate grasp prism pose");
 
-                void init(const core::RobotModelConstPtr& robot_model) override;
-                void compute() override;
+	void init(const core::RobotModelConstPtr& robot_model) override;
+	void compute() override;
 
-                void setEndEffector(const std::string& eef) { setProperty("eef", eef); }
-                void setObject(const std::string& object) { setProperty("object", object); }
-                void setObjectPoseTransform(const Eigen::Isometry3d& object_pose) { setProperty("object_pose_transform", object_pose); }
+	void setEndEffector(const std::string& eef) { setProperty("eef", eef); }
+	void setObject(const std::string& object) { setProperty("object", object); }
+	void setObjectPoseTransform(const Eigen::Isometry3d& object_pose) {
+		setProperty("object_pose_transform", object_pose);
+	}
 
-                void setAngleDelta(double delta) { setProperty("angle_delta", delta); }
-                void setAxis(Eigen::Vector3d& axis) { setProperty("axis", axis); }
-                void setAngleShapeDelta(double delta) { setProperty("angle_shape_delta", delta); }
-                void setAxisShape(Eigen::Vector3d& axis) { setProperty("axis_shape", axis); }
+	void setAngleDelta(double delta) { setProperty("angle_delta", delta); }
+	void setAxis(const Eigen::Vector3d& axis) { setProperty("axis", axis); }
+	void setAngleShapeDelta(double delta) { setProperty("angle_shape_delta", delta); }
+	void setAxisShape(const Eigen::Vector3d& axis) { setProperty("axis_shape", axis); }
 
-                void setGap(double gap) { setProperty("gap", gap); }
-                void setLength(double length) { setProperty("length", length); }
-                void setHeight(double height) { setProperty("height", height); }
+	void setGap(double gap) { setProperty("gap", gap); }
+	void setLength(double length) { setProperty("length", length); }
+	void setHeight(double height) { setProperty("height", height); }
 
-                void setLengthDelta(double length) { setProperty("length_delta", length); }
-                void setHeightDelta(double height) { setProperty("height_delta", height); }
+	void setLengthSize(double length) { setProperty("length_max", length); }
+	void setHeightSize(double height) { setProperty("height_max", height); }
 
-                void setPreGraspPose(const moveit_msgs::RobotState& pregrasp) { properties().set("pregrasp", pregrasp); }
-                void setGraspPose(const std::string& grasp) { properties().set("grasp", grasp); }
-                void setGraspPose(const moveit_msgs::RobotState& grasp) { properties().set("grasp", grasp); }
+	void setLengthDelta(double length) { setProperty("length_delta", length); }
+	void setHeightDelta(double height) { setProperty("height_delta", height); }
 
-            protected:
-                void onNewSolution(const SolutionBase& s) override;
-            };
-        }
-    }
-}
+	void setPreGraspPose(const moveit_msgs::RobotState& pregrasp) { properties().set("pregrasp", pregrasp); }
+	void setGraspPose(const std::string& grasp) { properties().set("grasp", grasp); }
+	void setGraspPose(const moveit_msgs::RobotState& grasp) { properties().set("grasp", grasp); }
+
+protected:
+	void onNewSolution(const SolutionBase& s) override;
+};
+}  // namespace stages
+}  // namespace task_constructor
+}  // namespace moveit

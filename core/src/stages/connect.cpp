@@ -96,8 +96,10 @@ void Connect::init(const core::RobotModelConstPtr& robot_model) {
 }
 
 bool Connect::compatible(const InterfaceState& from_state, const InterfaceState& to_state) const {
-	if (!Connecting::compatible(from_state, to_state))
+	if (!Connecting::compatible(from_state, to_state)) {
+		ROS_DEBUG_STREAM_NAMED("Connect", "---------------------------------------------   " << name());
 		return false;
+	}
 
 	const moveit::core::RobotState& from = from_state.scene()->getCurrentState();
 	const moveit::core::RobotState& to = to_state.scene()->getCurrentState();
@@ -244,6 +246,6 @@ SubTrajectoryPtr Connect::merge(const std::vector<robot_trajectory::RobotTraject
 
 	return std::make_shared<SubTrajectory>(trajectory, cost);
 }
-}
-}
-}
+}  // namespace stages
+}  // namespace task_constructor
+}  // namespace moveit

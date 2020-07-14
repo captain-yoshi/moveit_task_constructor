@@ -39,6 +39,7 @@
 #pragma once
 
 #include <moveit/task_constructor/stages/generate_pose.h>
+#include <Eigen/Geometry>
 
 namespace moveit {
 namespace task_constructor {
@@ -54,7 +55,10 @@ public:
 
 	void setEndEffector(const std::string& eef) { setProperty("eef", eef); }
 	void setObject(const std::string& object) { setProperty("object", object); }
+	void setObjectPose(const Eigen::Isometry3d& object_pose) { setProperty("object_pose", object_pose); }
+
 	void setAngleDelta(double delta) { setProperty("angle_delta", delta); }
+	void setAngleAxis(const Eigen::Vector3d& axis) { setProperty("angle_axis", axis); }
 
 	void setPreGraspPose(const std::string& pregrasp) { properties().set("pregrasp", pregrasp); }
 	void setPreGraspPose(const moveit_msgs::RobotState& pregrasp) { properties().set("pregrasp", pregrasp); }
@@ -64,6 +68,6 @@ public:
 protected:
 	void onNewSolution(const SolutionBase& s) override;
 };
-}
-}
-}
+}  // namespace stages
+}  // namespace task_constructor
+}  // namespace moveit

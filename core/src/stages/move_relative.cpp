@@ -51,7 +51,7 @@ MoveRelative::MoveRelative(const std::string& name, const solvers::PlannerInterf
 	p.property("timeout").setDefaultValue(1.0);
 	p.declare<std::string>("group", "name of planning group");
 	p.declare<geometry_msgs::PoseStamped>("ik_frame", "frame to be moved in Cartesian direction");
-    p.declare<Eigen::Isometry3d>("pose_transform", Eigen::Isometry3d::Identity(), "frame offset");
+	p.declare<Eigen::Isometry3d>("pose_transform", Eigen::Isometry3d::Identity(), "frame offset");
 
 	p.declare<boost::any>("direction", "motion specification");
 	// register actual types
@@ -207,8 +207,8 @@ bool MoveRelative::compute(const InterfaceState& state, planning_scene::Planning
 		try {  // try to extract Vector
 			const geometry_msgs::Vector3Stamped& target = boost::any_cast<geometry_msgs::Vector3Stamped>(direction);
 			const Eigen::Isometry3d& frame_pose = scene->getFrameTransform(target.header.frame_id);
-            Eigen::Isometry3d frame_pose_transform = props.get<Eigen::Isometry3d>("pose_transform");
-            frame_pose_transform = frame_pose * frame_pose_transform;
+			Eigen::Isometry3d frame_pose_transform = props.get<Eigen::Isometry3d>("pose_transform");
+			frame_pose_transform = frame_pose * frame_pose_transform;
 
 			tf::vectorMsgToEigen(target.vector, linear);
 
@@ -261,7 +261,8 @@ bool MoveRelative::compute(const InterfaceState& state, planning_scene::Planning
 			}
 		} else if (min_distance == 0.0) {  // if min_distance is zero, we succeed in any case
 			success = true;
-		}
+		} else if (!success)
+			solution.setComment("failed to move full distance");
 
 		// add an arrow marker
 		visualization_msgs::Marker m;
@@ -327,6 +328,6 @@ void MoveRelative::computeBackward(const InterfaceState& to) {
 	else
 		silentFailure();
 }
-}
-}
-}
+}  // namespace stages
+}  // namespace task_constructor
+}  // namespace moveit

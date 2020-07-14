@@ -44,185 +44,201 @@
 #include <Eigen/Geometry>
 #include <eigen_conversions/eigen_msg.h>
 
-
-
 namespace moveit {
-    namespace task_constructor {
-        namespace stages {
+namespace task_constructor {
+namespace stages {
 
-            GenerateGraspPrismPose::GenerateGraspPrismPose(const std::string& name) : GeneratePose(name) {
-                auto& p = properties();
-                p.declare<std::string>("eef", "name of end-effector");
-                p.declare<std::string>("object");
+GenerateGraspPrismPose::GenerateGraspPrismPose(const std::string& name) : GeneratePose(name) {
+	auto& p = properties();
+	p.declare<std::string>("eef", "name of end-effector");
+	p.declare<std::string>("object");
 
+	p.declare<double>("angle_shape_delta", "angular steps (rad)");
+	p.declare<Eigen::Vector3d>("axis_shape", "axis for angular steps wrt object or object_pose_transform");
 
-                p.declare<double>("angle_shape_delta", "angular steps (rad)");
-                p.declare<Eigen::Vector3d>("axis_shape", "axis for angular steps wrt object or object_pose_transform");
+	p.declare<double>("angle_delta", "angular steps (rad)");
+	p.declare<Eigen::Vector3d>("axis", "axis for angular steps wrt object or object_pose_transform");
 
-                p.declare<double>("angle_delta", "angular steps (rad)");
-                p.declare<Eigen::Vector3d>("axis", "axis for angular steps wrt object or object_pose_transform");
+	p.declare<Eigen::Isometry3d>("object_pose_transform", "pose transform wrt to object mesh origin");
 
-                p.declare<Eigen::Isometry3d>("object_pose_transform", "pose transform wrt to object mesh origin");
+	p.declare<double>("gap", "gap width");
+	p.declare<double>("length", "length");
+	p.declare<double>("height", "height ");
+	p.declare<double>("length_max", "number of oi");
+	p.declare<double>("height_max", "height ");
 
-                p.declare<double>("gap", "gap width");
-                p.declare<double>("length", "length");
-                p.declare<double>("height", "height ");
+	p.declare<double>("length_delta", "translate steps (m)");
+	p.declare<double>("height_delta", "translate steps (m)");
 
-                p.declare<double>("length_delta", "translate steps (m)");
-                p.declare<double>("height_delta", "translate steps (m)");
-
-                p.declare<boost::any>("pregrasp", "pregrasp posture");
-                p.declare<boost::any>("grasp", "grasp posture");
-            }
-
-            void GenerateGraspPrismPose::init(const core::RobotModelConstPtr& robot_model) {
-                InitStageException errors;
-                try {
-                    GeneratePose::init(robot_model);
-                } catch (InitStageException& e) {
-                    errors.append(e);
-                }
-
-                const auto& props = properties();
-
-                // check angle_delta
-                if (props.get<double>("angle_delta") == 0.)
-                    errors.push_back(*this, "angle_delta must be non-zero");
-
-                if (props.get<double>("angle_shape_delta") == 0.)
-                    errors.push_back(*this, "angle_shape_delta must be non-zero");
-
-                if (props.get<double>("length_delta") == 0.)
-                    errors.push_back(*this, "length_delta must be non-zero");
-
-                if (props.get<double>("height_delta") == 0.)
-                    errors.push_back(*this, "height_delta must be non-zero");
-
-                // check availability of object
-                props.get<std::string>("object");
-                // check availability of eef
-                const std::string& eef = props.get<std::string>("eef");
-                if (!robot_model->hasEndEffector(eef))
-                    errors.push_back(*this, "unknown end effector: " + eef);
-                else {
-                    // check availability of eef pose
-                    //const moveit::core::JointModelGroup* jmg = robot_model->getEndEffector(eef);
-                    //const std::string& name = props.get<std::string>("pregrasp");
-                    //std::map<std::string, double> m;
-                    //if (!jmg->getVariableDefaultPositions(name, m))
-                    //	errors.push_back(*this, "unknown end effector pose: " + name);
-                }
-
-                if (errors)
-                    throw errors;
-            }
-
-            void GenerateGraspPrismPose::onNewSolution(const SolutionBase& s) {
-                planning_scene::PlanningSceneConstPtr scene = s.end()->scene();
-
-                const auto& props = properties();
-                const std::string& object = props.get<std::string>("object");
-                if (!scene->knowsFrameTransform(object)) {
-                    const std::string msg = "object '" + object + "' not in scene";
-                    if (storeFailures()) {
-                        InterfaceState state(scene);
-                        SubTrajectory solution;
-                        solution.markAsFailure();
-                        solution.setComment(msg);
-                        spawn(std::move(state), std::move(solution));
-                    } else
-                        ROS_WARN_STREAM_NAMED("GenerateGraspPose", msg);
-                    return;
-                }
-
-                upstream_solutions_.push(&s);
-            }
-
-            void GenerateGraspPrismPose::compute() {
-                if (upstream_solutions_.empty())
-                    return;
-                planning_scene::PlanningScenePtr scene = upstream_solutions_.pop()->end()->scene()->diff();
-
-                // set end effector pose
-                const auto& props = properties();
-                const std::string& eef = props.get<std::string>("eef");
-                const moveit::core::JointModelGroup* jmg = scene->getRobotModel()->getEndEffector(eef);
-
-                robot_state::RobotState& robot_state = scene->getCurrentStateNonConst();
-                moveit_msgs::RobotState robot_state_msg = props.get<moveit_msgs::RobotState>("pregrasp");
-                robotStateMsgToRobotState(robot_state_msg, robot_state);
-
-
-                geometry_msgs::PoseStamped target_pose_msg;
-                target_pose_msg.header.frame_id = props.get<std::string>("object");
-
-                Eigen::Vector3d axis_shape = props.get<Eigen::Vector3d>("axis_shape");
-                Eigen::Vector3d axis = props.get<Eigen::Vector3d>("axis");
-                Eigen::Isometry3d object_pose_transform = props.get<Eigen::Isometry3d>("object_pose_transform");
-
-
-                double length = props.get<double>("length");
-                double height = props.get<double>("height");
-
-                double length_delta = props.get<double>("length_delta");
-                double height_delta = props.get<double>("height_delta");
-
-
-
-                // Translation length
-                //double current_length_ = -length/2.0;
-                double current_length_ = 0.0;
-                while (current_length_ < length/2.0) {
-
-                    Eigen::Isometry3d temp_pose(object_pose_transform);
-                    temp_pose.pretranslate(Eigen::Vector3d(current_length_, 0, 0));
-                    current_length_ += length_delta;
-
-                    // Translation height
-                    //double current_height_ = -height / 2.0;
-		    double current_height_ = 0.0;
-                    while (current_height_ < height / 2.0) {
-
-                        temp_pose.translate(Eigen::Vector3d(0, current_height_, 0));
-                        current_height_ += height_delta;
-
-                        // ROtate along prism
-                        double current_angle_ = 0.0;
-                        while (current_angle_ < 2. * M_PI && current_angle_ > -2. * M_PI) {
-
-                            // TODO add translation first
-
-
-                            temp_pose = temp_pose * Eigen::AngleAxisd(current_angle_, axis);
-                            current_angle_ += props.get<double>("angle_delta");
-
-                            // Try grasping each of pair of prism sides
-                            double current_shape_angle_ = 0.0;
-                            while (current_shape_angle_ < 2. * M_PI && current_shape_angle_ > -2. * M_PI) {
-                                // rotate object pose about z-axis
-                                Eigen::Isometry3d target_pose(
-                                        temp_pose * Eigen::AngleAxisd(current_shape_angle_, axis_shape));
-                                current_shape_angle_ += props.get<double>("angle_shape_delta");
-
-                                InterfaceState state(scene);
-                                tf::poseEigenToMsg(target_pose, target_pose_msg.pose);
-                                state.properties().set("target_pose", target_pose_msg);
-                                props.exposeTo(state.properties(), {"pregrasp", "grasp"});
-
-                                SubTrajectory trajectory;
-                                trajectory.setCost(0.0);
-                                trajectory.setComment(std::to_string(current_shape_angle_));
-
-                                // add frame at target pose
-                                rviz_marker_tools::appendFrame(trajectory.markers(), target_pose_msg, 0.1,
-                                                               "grasp frame");
-
-                                spawn(std::move(state), std::move(trajectory));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+	p.declare<boost::any>("pregrasp", "pregrasp posture");
+	p.declare<boost::any>("grasp", "grasp posture");
 }
+
+void GenerateGraspPrismPose::init(const core::RobotModelConstPtr& robot_model) {
+	InitStageException errors;
+	try {
+		GeneratePose::init(robot_model);
+	} catch (InitStageException& e) {
+		errors.append(e);
+	}
+
+	const auto& props = properties();
+
+	// check angle_delta
+	if (props.get<double>("angle_delta") == 0.)
+		errors.push_back(*this, "angle_delta must be non-zero");
+
+	if (props.get<double>("angle_shape_delta") == 0.)
+		errors.push_back(*this, "angle_shape_delta must be non-zero");
+
+	if (props.get<double>("length_delta") == 0.)
+		errors.push_back(*this, "length_delta must be non-zero");
+
+	if (props.get<double>("height_delta") == 0.)
+		errors.push_back(*this, "height_delta must be non-zero");
+
+	// check availability of object
+	props.get<std::string>("object");
+	// check availability of eef
+	const std::string& eef = props.get<std::string>("eef");
+	if (!robot_model->hasEndEffector(eef))
+		errors.push_back(*this, "unknown end effector: " + eef);
+	else {
+		// check availability of eef pose
+		// const moveit::core::JointModelGroup* jmg = robot_model->getEndEffector(eef);
+		// const std::string& name = props.get<std::string>("pregrasp");
+		// std::map<std::string, double> m;
+		// if (!jmg->getVariableDefaultPositions(name, m))
+		//	errors.push_back(*this, "unknown end effector pose: " + name);
+	}
+
+	if (errors)
+		throw errors;
+}
+
+void GenerateGraspPrismPose::onNewSolution(const SolutionBase& s) {
+	planning_scene::PlanningSceneConstPtr scene = s.end()->scene();
+
+	const auto& props = properties();
+	const std::string& object = props.get<std::string>("object");
+	if (!scene->knowsFrameTransform(object)) {
+		const std::string msg = "object '" + object + "' not in scene";
+		if (storeFailures()) {
+			InterfaceState state(scene);
+			SubTrajectory solution;
+			solution.markAsFailure();
+			solution.setComment(msg);
+			spawn(std::move(state), std::move(solution));
+		} else
+			ROS_WARN_STREAM_NAMED("GenerateGraspPose", msg);
+		return;
+	}
+
+	upstream_solutions_.push(&s);
+}
+
+void GenerateGraspPrismPose::compute() {
+	if (upstream_solutions_.empty())
+		return;
+	planning_scene::PlanningScenePtr scene = upstream_solutions_.pop()->end()->scene()->diff();
+
+	// set end effector pose
+	const auto& props = properties();
+	const std::string& eef = props.get<std::string>("eef");
+	const moveit::core::JointModelGroup* jmg = scene->getRobotModel()->getEndEffector(eef);
+
+	robot_state::RobotState& robot_state = scene->getCurrentStateNonConst();
+	moveit_msgs::RobotState robot_state_msg = props.get<moveit_msgs::RobotState>("pregrasp");
+	robotStateMsgToRobotState(robot_state_msg, robot_state);
+
+	geometry_msgs::PoseStamped target_pose_msg;
+	target_pose_msg.header.frame_id = props.get<std::string>("object");
+
+	Eigen::Vector3d axis_shape = props.get<Eigen::Vector3d>("axis_shape");
+	Eigen::Vector3d axis = props.get<Eigen::Vector3d>("axis");
+	Eigen::Isometry3d object_pose_transform = props.get<Eigen::Isometry3d>("object_pose_transform");
+
+	// Length of area
+	double length = props.get<double>("length");
+	double length_delta = props.get<double>("length_delta");
+	double length_max = props.get<double>("length_max");
+
+	std::vector<double> delta_lengths;
+
+	for (int i = 0; i < length_max; i++) {
+		if (i == 0) {
+			delta_lengths.push_back(0);
+		} else {
+			delta_lengths.push_back(i * length_delta);
+			delta_lengths.push_back(-i * length_delta);
+		}
+	}
+
+	// Height of area
+	double height = props.get<double>("height");
+	double height_delta = props.get<double>("height_delta");
+	double height_max = props.get<double>("height_max");
+
+	std::vector<double> delta_heights;
+
+	for (int i = 0; i < height_max; i++) {
+		if (i == 0) {
+			delta_heights.push_back(0);
+		} else {
+			delta_heights.push_back(i * height_delta);
+			delta_heights.push_back(-i * height_delta);
+		}
+	}
+
+	// Cost based
+	double cost = 0.0;
+
+	for (const auto& curr_length : delta_lengths) {
+		Eigen::Isometry3d temp_pose(object_pose_transform);
+		temp_pose.translate(Eigen::Vector3d(0, 0, curr_length));
+
+		cost = abs(curr_length * 100);
+
+		// Translation height
+		// double current_height_ = -height / 2.0;
+		double current_height_ = 0.0;
+		for (const auto& curr_height : delta_heights) {
+			temp_pose.translate(Eigen::Vector3d(curr_height, 0, 0));
+
+			double real_cost = cost + abs(current_height_ * 100);
+			// ROtate along prism
+			double current_shape_angle_ = 0.0;
+			while (current_shape_angle_ < 2. * M_PI && current_shape_angle_ > -2. * M_PI) {
+				// TODO add translation first
+				Eigen::Isometry3d target_pose1(temp_pose * Eigen::AngleAxisd(current_shape_angle_, axis_shape));
+
+				current_shape_angle_ += props.get<double>("angle_shape_delta");
+
+				// Try grasping each of pair of prism sides
+				double current_angle_ = 0.0;
+				while (current_angle_ < 2. * M_PI && current_angle_ > -2. * M_PI) {
+					// rotate object pose about z-axis
+					Eigen::Isometry3d target_pose(target_pose1 * Eigen::AngleAxisd(current_angle_, axis));
+					current_angle_ += props.get<double>("angle_delta");
+
+					InterfaceState state(scene);
+					tf::poseEigenToMsg(target_pose, target_pose_msg.pose);
+					state.properties().set("target_pose", target_pose_msg);
+					props.exposeTo(state.properties(), { "pregrasp", "grasp" });
+
+					SubTrajectory trajectory;
+					trajectory.setCost(0.0);
+					trajectory.setComment(std::to_string(curr_length) + ", " + std::to_string(curr_height));
+
+					// add frame at target pose
+					rviz_marker_tools::appendFrame(trajectory.markers(), target_pose_msg, 0.1, "grasp frame");
+
+					spawn(std::move(state), std::move(trajectory));
+				}
+			}
+		}
+	}
+}
+}  // namespace stages
+}  // namespace task_constructor
+}  // namespace moveit

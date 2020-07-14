@@ -57,7 +57,7 @@ std::string getProcessId() {
 	gethostname(our_hostname, sizeof(our_hostname) - 1);
 	return std::to_string(getpid()) + "@" + our_hostname;
 }
-}
+}  // namespace
 
 class IntrospectionPrivate
 {
@@ -133,9 +133,10 @@ void Introspection::registerSolution(const SolutionBase& s) {
 
 void Introspection::fillSolution(moveit_task_constructor_msgs::Solution& msg, const SolutionBase& s) {
 	s.fillMessage(msg, this);
+	s.start()->scene()->getPlanningSceneMsg(msg.start_scene);
+
 	msg.process_id = impl->process_id_;
 	msg.task_id = impl->task_->id();
-	s.start()->scene()->getPlanningSceneMsg(msg.start_scene);
 }
 
 void Introspection::publishSolution(const SolutionBase& s) {
@@ -258,5 +259,5 @@ Introspection::fillTaskStatistics(moveit_task_constructor_msgs::TaskStatistics& 
 	msg.process_id = impl->process_id_;
 	return msg;
 }
-}
-}
+}  // namespace task_constructor
+}  // namespace moveit
