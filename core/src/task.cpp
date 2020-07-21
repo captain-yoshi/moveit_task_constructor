@@ -66,7 +66,7 @@ std::string rosNormalizeName(const std::string& name) {
 	}
 	return n;
 }
-}
+}  // namespace
 
 namespace moveit {
 namespace task_constructor {
@@ -217,7 +217,7 @@ void Task::enableIntrospection(bool enable) {
 		    [](Stage& stage, int) {
 			    stage.pimpl()->setIntrospection(nullptr);
 			    return true;
-			 },
+		    },
 		    1, UINT_MAX);
 		impl->introspection_.reset();
 	}
@@ -269,7 +269,7 @@ void Task::init() {
 	    [impl](Stage& stage, int) {
 		    stage.pimpl()->setIntrospection(impl->introspection_.get());
 		    return true;
-		 },
+	    },
 	    1, UINT_MAX);
 
 	// first time publish task
@@ -291,6 +291,7 @@ bool Task::plan(size_t max_solutions) {
 	init();
 
 	impl->preempt_requested_ = false;
+	s_catch_signals();
 	while (ros::ok() && !impl->preempt_requested_ && canCompute() &&
 	       (max_solutions == 0 || numSolutions() < max_solutions)) {
 		compute();
@@ -298,6 +299,11 @@ bool Task::plan(size_t max_solutions) {
 			cb(*this);
 		if (impl->introspection_)
 			impl->introspection_->publishTaskState();
+		if (s_interrupted) {
+			s_unregister_signals();
+			preempt();
+			ROS_WARN("CTRL-C detected...");
+		}
 	}
 	printState();
 	return numSolutions() > 0;
@@ -360,5 +366,5 @@ const core::RobotModelConstPtr& Task::getRobotModel() const {
 void Task::printState(std::ostream& os) const {
 	os << *stages();
 }
-}
-}
+}  // namespace task_constructor
+}  // namespace moveit
