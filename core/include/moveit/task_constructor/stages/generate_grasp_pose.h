@@ -55,10 +55,10 @@ public:
 
 	void setEndEffector(const std::string& eef) { setProperty("eef", eef); }
 	void setObject(const std::string& object) { setProperty("object", object); }
-	void setObjectPose(const Eigen::Isometry3d& object_pose) { setProperty("object_pose", object_pose); }
+	void setObjectPose(const std::vector<Eigen::Isometry3d>& object_poses) { setProperty("object_poses", object_poses); }
 
 	void setAngleDelta(double delta) { setProperty("angle_delta", delta); }
-	void setAngleAxis(const Eigen::Vector3d& axis) { setProperty("angle_axis", axis); }
+	// void setAngleAxis(const Eigen::Vector3d& axis) { setProperty("angle_axis", axis); }
 
 	void setPreGraspPose(const std::string& pregrasp) { properties().set("pregrasp", pregrasp); }
 	void setPreGraspPose(const moveit_msgs::RobotState& pregrasp) { properties().set("pregrasp", pregrasp); }

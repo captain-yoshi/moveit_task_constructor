@@ -53,10 +53,11 @@ GenerateGraspPose::GenerateGraspPose(const std::string& name) : GeneratePose(nam
 	auto& p = properties();
 	p.declare<std::string>("eef", "name of end-effector");
 	p.declare<std::string>("object");
-	p.declare<Eigen::Isometry3d>("object_pose", Eigen::Isometry3d::Identity(), "pose transform wrt object mesh origin");
+	p.declare<std::vector<Eigen::Isometry3d>>("object_poses", std::vector<Eigen::Isometry3d>(),
+	                                          "pose transform list wrt object mesh origin");
 
 	p.declare<double>("angle_delta", 0.1, "angular steps (rad)");
-	p.declare<Eigen::Vector3d>("angle_axis", "axis for angular steps wrt object or object_pose_transform");
+	// p.declare<Eigen::Vector3d>("angle_axis", "axis for angular steps wrt object or object_pose_transform");
 
 	p.declare<boost::any>("pregrasp", "pregrasp posture");
 	p.declare<boost::any>("grasp", "grasp posture");
@@ -73,8 +74,8 @@ void GenerateGraspPose::init(const core::RobotModelConstPtr& robot_model) {
 	const auto& props = properties();
 
 	// check angle_delta
-	if (props.get<double>("angle_delta") == 0.)
-		errors.push_back(*this, "angle_delta must be non-zero");
+	// if (props.get<double>("angle_delta") == 0.)
+	//	errors.push_back(*this, "angle_delta must be non-zero");
 
 	// check availability of object
 	props.get<std::string>("object");
@@ -139,14 +140,14 @@ void GenerateGraspPose::compute() {
 	geometry_msgs::PoseStamped target_pose_msg;
 	target_pose_msg.header.frame_id = props.get<std::string>("object");
 
-	Eigen::Vector3d axis = props.get<Eigen::Vector3d>("angle_axis");
-	Eigen::Isometry3d object_pose = props.get<Eigen::Isometry3d>("object_pose");
+	// Eigen::Vector3d axis = props.get<Eigen::Vector3d>("angle_axis");
+	std::vector<Eigen::Isometry3d> object_poses = props.get<std::vector<Eigen::Isometry3d>>("object_poses");
 
-	double current_angle_ = 0.0;
-	while (current_angle_ < 2. * M_PI && current_angle_ > -2. * M_PI) {
+	for (const auto& target_pose : object_poses) {
 		// rotate object pose about z-axis
-		Eigen::Isometry3d target_pose(object_pose * Eigen::AngleAxisd(current_angle_, axis));
-		current_angle_ += props.get<double>("angle_delta");
+		// Eigen::Isometry3d target_pose(object_pose * Eigen::AngleAxisd(current_angle_, axis));
+
+		// current_angle_ += props.get<double>("angle_delta");
 
 		InterfaceState state(scene);
 		tf::poseEigenToMsg(target_pose, target_pose_msg.pose);
@@ -155,7 +156,7 @@ void GenerateGraspPose::compute() {
 
 		SubTrajectory trajectory;
 		trajectory.setCost(0.0);
-		trajectory.setComment(std::to_string(current_angle_));
+		// trajectory.setComment(std::to_string(current_angle_));
 
 		// add frame at target pose
 		rviz_marker_tools::appendFrame(trajectory.markers(), target_pose_msg, 0.1, "grasp frame");
