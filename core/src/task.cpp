@@ -305,6 +305,7 @@ bool Task::plan(size_t max_solutions) {
 			ROS_WARN("CTRL-C detected...");
 		}
 	}
+	s_unregister_signals();
 	printState();
 	return numSolutions() > 0;
 }
