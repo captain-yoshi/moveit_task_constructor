@@ -101,8 +101,9 @@ void ModifyPlanningScene::allowCollisions(planning_scene::PlanningScene& scene, 
 		acm.setEntry(pairs.first, pairs.second, allow);
 }
 
-void ModifyPlanningScene::setCollisionObjects(planning_scene::PlanningScene& scene, const moveit_msgs::CollisionObject& obj) {
-	//getCollisionObjectMsg(moveit_msgs::CollisionObject& collision_obj, const std::string& ns) const
+void ModifyPlanningScene::setCollisionObjects(planning_scene::PlanningScene& scene,
+                                              const moveit_msgs::CollisionObject& obj) {
+	// getCollisionObjectMsg(moveit_msgs::CollisionObject& collision_obj, const std::string& ns) const
 	scene.processCollisionObjectMsg(obj);
 }
 
@@ -129,6 +130,6 @@ InterfaceState ModifyPlanningScene::apply(const InterfaceState& from, bool inver
 
 	return result;
 }
-}
-}
-}
+}  // namespace stages
+}  // namespace task_constructor
+}  // namespace moveit

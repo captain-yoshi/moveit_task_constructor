@@ -39,9 +39,9 @@
 
 #include <moveit/planning_scene/planning_scene.h>
 #include <moveit/robot_state/robot_state.h>
-#if MOVEIT_CARTESIAN_INTERPOLATOR
+//#if MOVEIT_CARTESIAN_INTERPOLATOR
 #include <moveit/robot_state/cartesian_interpolator.h>
-#endif
+//#endif
 
 #include <moveit/trajectory_processing/iterative_spline_parameterization.h>
 #include <moveit/trajectory_processing/iterative_time_parameterization.h>
@@ -55,6 +55,8 @@
 #include <eigen_conversions/eigen_msg.h>
 
 #include <rviz_marker_tools/marker_creation.h>
+
+#include <moveit/trajectory_processing/time_optimal_trajectory_generation.h>
 
 namespace {
 /** Compute prototype waypoints for pouring.
@@ -182,9 +184,9 @@ void SpreadOver::compute(const InterfaceState& input, planning_scene::PlanningSc
 
 		// TODO: this has to use computeCartesianPath because
 		// there is currently no multi-waypoint callback in cartesian_planner
-#if MOVEIT_CARTESIAN_INTERPOLATOR
+		//#if MOVEIT_CARTESIAN_INTERPOLATOR
 		double path_fraction = moveit::core::CartesianInterpolator::computeCartesianPath(
-		    &state, group, traj, state.getLinkModel(bottle.link_name), waypoints, true /* global reference_frame */,
+		    &state, group, traj, state.getLinkModel(spreader.link_name), waypoints, true /* global reference_frame */,
 		    moveit::core::MaxEEFStep(.03) /* max step size */, moveit::core::JumpThreshold(2.0) /* jump threshold */,
 		    [&scene](moveit::core::RobotState* rs, const moveit::core::JointModelGroup* jmg,
 		             const double* joint_positions) {
@@ -192,235 +194,61 @@ void SpreadOver::compute(const InterfaceState& input, planning_scene::PlanningSc
 			    rs->update();
 			    return !scene.isStateColliding(*rs, jmg->getName());
 		    });
-#else
-		ROS_DEBUG_STREAM("Link name = " << state.getLinkModel(spreader.link_name)->getName());
+		//#else
+		/*
+		      ROS_DEBUG_STREAM("Link name = " << state.getLinkModel(spreader.link_name)->getName());
 
-		double path_fraction = state.computeCartesianPath(
-		    group, traj, state.getLinkModel(spreader.link_name), waypoints, true /* global reference_frame */,
-		    .03 /* max step size */, 2.0 /* jump threshold */,
-		    [&scene](moveit::core::RobotState* rs, const moveit::core::JointModelGroup* jmg,
-		             const double* joint_positions) {
-			    rs->setJointGroupPositions(jmg, joint_positions);
-			    rs->update();
-			    return !scene.isStateColliding(*rs, jmg->getName());
-		    });
-#endif
+		      double path_fraction = state.computeCartesianPath(
+		          group, traj, state.getLinkModel(spreader.link_name), waypoints, true ,
+		          .01 , 1.5 ,
+		          [&scene](moveit::core::RobotState* rs, const moveit::core::JointModelGroup* jmg,
+		                   const double* joint_positions) {
+		         rs->setJointGroupPositions(jmg, joint_positions);
+		         rs->update();
+		         return !scene.isStateColliding(*rs, jmg->getName());
+		          });
+		* /
+		    //#endif
 
-		/* build executable RobotTrajectory (downward and back up) */
+		    /* build executable RobotTrajectory (downward and back up) */
+
 		auto robot_trajectory = std::make_shared<robot_trajectory::RobotTrajectory>(robot_model, group);
 
 		for (const auto& waypoint : traj) {
-			robot_trajectory->addSuffixWayPoint(waypoint, 0.0);
+			robot_trajectory->addSuffixWayPoint(waypoint, 0);
 		}
 
 		/* generate time parameterization */
 		// TODO: revert code and interfaces to ISP / needs testing on hardware
 		trajectory_processing::IterativeSplineParameterization isp;
-		const double velocity_scaling = 1.0;
+		const double velocity_scaling = 0.2;
 		const double acceleration_scaling = 1.0;
+
+		bool tp_rc = false;
 		{
 			trajectory_processing::IterativeParabolicTimeParameterization iptp;
-			isp.computeTimeStamps(*robot_trajectory, velocity_scaling, acceleration_scaling);
+			tp_rc = isp.computeTimeStamps(*robot_trajectory, velocity_scaling, acceleration_scaling);
 		}
-		for (size_t i = 0; i < robot_trajectory->getWayPointCount(); ++i)
-			robot_trajectory->setWayPointDurationFromPrevious(i, waypoint_duration.toSec());
-
-		/*
-	for(size_t i= 0; i < back_trajectory.getWayPointCount(); ++i)
-		back_trajectory.setWayPointDurationFromPrevious(i, waypoint_duration.toSec());*/
-
-		/* combine downward and upward motion / sleep pour_duration seconds between */
 
 		trajectory.setTrajectory(robot_trajectory);
 
 		result = scene.diff();
 		result->setCurrentState(robot_trajectory->getLastWayPoint());
-
-		if (path_fraction < min_path_fraction) {
+		if (path_fraction < 1.0) {
 			ROS_WARN_STREAM("SpreadOver only produced motion for " << path_fraction << " of the way. Rendering invalid");
 			trajectory.setCost(std::numeric_limits<double>::infinity());
-			// trajectory.setComment("pouring axis angle " + std::to_string(tilt_axis_angle));
+			trajectory.setComment("computed path_fraction = " + std::to_string(path_fraction));
 			return;
 		}
-	}
-	return;
-
-	// NOTE old api
-	{
-		const auto& props = properties();
-
-		const std::string& container_name = props.get<std::string>("container");
-		const std::string& bottle_name = props.get<std::string>("bottle");
-
-		const Eigen::Translation3d pour_offset(props.get<Eigen::Vector3d>("pour_offset"));
-		const auto& tilt_angle = props.get<double>("tilt_angle");
-
-		const auto& min_path_fraction = props.get<double>("min_path_fraction");
-
-		const ros::Duration pour_duration(props.get<ros::Duration>("pour_duration"));
-		const ros::Duration waypoint_duration(props.get<ros::Duration>("waypoint_duration"));
-
-		const planning_scene::PlanningScene& scene = *input.scene();
-		moveit::core::RobotModelConstPtr robot_model = scene.getRobotModel();
-		const moveit::core::JointModelGroup* group = robot_model->getJointModelGroup(props.get<std::string>("group"));
-
-		/* validate planning environment is prepared for pouring */
-		moveit_msgs::CollisionObject container;
-		if (!scene.getCollisionObjectMsg(container, container_name))
-			throw std::runtime_error("container object '" + container_name + "' is not specified in input planning scene");
-		// if (!isValidObject(container))
-		//	throw std::runtime_error("SpreadOver: container is neither a valid cylinder nor mesh.");
-
-		moveit_msgs::AttachedCollisionObject bottle;
-		if (!scene.getAttachedCollisionObjectMsg(bottle, bottle_name))
-			throw std::runtime_error("bottle '" + bottle_name +
-			                         "' is not an attached collision object in input planning scene");
-		// if (!isValidObject(bottle.object))
-		//	throw std::runtime_error("SpreadOver: bottle is neither a valid cylinder nor mesh.");
-
-		moveit::core::RobotState state(scene.getCurrentState());
-
-		// container frame:
-		// - top-center of container object
-		// - rotation should coincide with the planning frame
-		Eigen::Isometry3d container_frame =
-		    scene.getFrameTransform(container_name) * Eigen::Translation3d(Eigen::Vector3d(0, 0, 10000 / 2));
-		container_frame.linear().setIdentity();
-
-		/* compute pouring axis as one angle (tilt_axis_angle) in x-y plane */
-		//// TODO: spawn many axis if this is not set
-		const auto& pouring_axis = props.get<geometry_msgs::Vector3Stamped>("pouring_axis");
-		Eigen::Vector3d tilt_axis;
-		tf::vectorMsgToEigen(pouring_axis.vector, tilt_axis);
-		tilt_axis = container_frame.inverse() * scene.getFrameTransform(pouring_axis.header.frame_id) * tilt_axis;
-		// always tilt around axis in x-y plane
-		tilt_axis.z() = 0.0;
-		double tilt_axis_angle = std::atan2(tilt_axis.y(), tilt_axis.x());
-
-		const Eigen::Isometry3d& bottle_frame = scene.getFrameTransform(bottle_name);
-
-		// assume bottle tip as top-center of cylinder/mesh
-
-		auto& attached_bottle_tfs = state.getAttachedBody(bottle_name)->getFixedTransforms();
-		assert(attached_bottle_tfs.size() > 0 && "impossible: attached body does not know transform to its link");
-
-		const Eigen::Translation3d bottle_tip(Eigen::Vector3d(0, 0, 1000 / 2));
-		const Eigen::Isometry3d bottle_tip_in_tool_link(attached_bottle_tfs[0] * bottle_tip);
-
-		const Eigen::Isometry3d bottle_tip_in_container_frame = container_frame.inverse() * bottle_frame * bottle_tip;
-
-		/* Cartesian waypoints for pouring motion */
-		EigenSTL::vector_Isometry3d waypoints;
-
-		/* generate waypoints in y-z plane */
-		// computePouringWaypoints(bottle_tip_in_container_frame, tilt_angle, pour_offset, waypoints,
-		//                        props.get<size_t>("waypoint_count"));
-
-		/* rotate y-z plane so tilt motion is along the specified tilt_axis */
-		for (auto& waypoint : waypoints)
-			waypoint = Eigen::AngleAxisd(tilt_axis_angle, Eigen::Vector3d::UnitZ()) * waypoint *
-			           Eigen::AngleAxisd(-tilt_axis_angle, Eigen::Vector3d::UnitZ());
-
-		// TODO: possibly also spawn alternatives:
-		// for(auto& waypoint : waypoints)
-		//	waypoint= Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitZ()) * waypoint *
-		// Eigen::AngleAxisd(M_PI,
-		// Eigen::Vector3d::UnitZ());
-
-		/* transform waypoints to planning frame */
-		for (auto& waypoint : waypoints)
-			waypoint = container_frame * waypoint;
-
-		for (auto waypoint : waypoints) {
-			geometry_msgs::PoseStamped p;
-			p.header.frame_id = scene.getPlanningFrame();
-			tf::poseEigenToMsg(waypoint, p.pose);
-
-			rviz_marker_tools::appendFrame(trajectory.markers(), p, 0.1, markerNS());
-
-			// visualization_msgs::Marker tip;
-			// tip.ns= markerNS();
-			// tip.header= p.header;
-			// tip.pose= rviz_marker_tools::composePoses(p.pose,
-			// Eigen::Isometry3d(Eigen::AngleAxisd(-M_PI/2, Eigen::Vector3d(0,1,0)))); tip.color.r=
-			// .588; tip.color.g= .196; tip.color.b= .588; tip.color.a= 1.0;
-			//// TODO: rename or move this package! maybe move it in with moveit_visual_tools?
-			// rviz_marker_tools::makeArrow(tip, .11, true);
-			// trajectory.markers().push_back(tip);
+		auto waypoint_count = robot_trajectory->getWayPointCount();
+		for (int i = 0; i < waypoint_count; ++i) {
+			double duration = robot_trajectory->getWaypointDurationFromStart(i);
+			ROS_DEBUG_STREAM("Waypoint duration from start = " << std::to_string(duration));
 		}
-
-		/* specify waypoints for tool link, not for bottle tip */
-		for (auto& waypoint : waypoints)
-			waypoint = waypoint * bottle_tip_in_tool_link.inverse();
-
-		std::vector<moveit::core::RobotStatePtr> traj;
-
-		// TODO: this has to use computeCartesianPath because
-		// there is currently no multi-waypoint callback in cartesian_planner
-#if MOVEIT_CARTESIAN_INTERPOLATOR
-		double path_fraction = moveit::core::CartesianInterpolator::computeCartesianPath(
-		    &state, group, traj, state.getLinkModel(bottle.link_name), waypoints, true /* global reference_frame */,
-		    moveit::core::MaxEEFStep(.03) /* max step size */, moveit::core::JumpThreshold(2.0) /* jump threshold */,
-		    [&scene](moveit::core::RobotState* rs, const moveit::core::JointModelGroup* jmg,
-		             const double* joint_positions) {
-			    rs->setJointGroupPositions(jmg, joint_positions);
-			    rs->update();
-			    return !scene.isStateColliding(*rs, jmg->getName());
-		    });
-#else
-		double path_fraction = state.computeCartesianPath(
-		    group, traj, state.getLinkModel(bottle.link_name), waypoints, true /* global reference_frame */,
-		    .03 /* max step size */, 2.0 /* jump threshold */,
-		    [&scene](moveit::core::RobotState* rs, const moveit::core::JointModelGroup* jmg,
-		             const double* joint_positions) {
-			    rs->setJointGroupPositions(jmg, joint_positions);
-			    rs->update();
-			    return !scene.isStateColliding(*rs, jmg->getName());
-		    });
-#endif
-
-		/* build executable RobotTrajectory (downward and back up) */
-		auto robot_trajectory = std::make_shared<robot_trajectory::RobotTrajectory>(robot_model, group);
-		robot_trajectory::RobotTrajectory back_trajectory(robot_model, group);
-
-		for (const auto& waypoint : traj) {
-			robot_trajectory->addSuffixWayPoint(waypoint, 0.0);
-		}
-
-		for (auto waypoint = traj.rbegin(); waypoint != traj.rend(); waypoint++) {
-			back_trajectory.addSuffixWayPoint(std::make_shared<robot_state::RobotState>(**waypoint), 0.0);
-		}
-
-		/* generate time parameterization */
-		// TODO: revert code and interfaces to ISP / needs testing on hardware
-		trajectory_processing::IterativeSplineParameterization isp;
-		const double velocity_scaling = 1.0;
-		const double acceleration_scaling = 1.0;
-		{
-			trajectory_processing::IterativeParabolicTimeParameterization iptp;
-			isp.computeTimeStamps(*robot_trajectory, velocity_scaling, acceleration_scaling);
-		}
-		{
-			trajectory_processing::IterativeParabolicTimeParameterization iptp;
-			isp.computeTimeStamps(back_trajectory, velocity_scaling, acceleration_scaling);
-		}
-		/*for(size_t i= 0; i < robot_trajectory->getWayPointCount(); ++i)
-		   robot_trajectory->setWayPointDurationFromPrevious(i, waypoint_duration.toSec());
-		for(size_t i= 0; i < back_trajectory.getWayPointCount(); ++i)
-		   back_trajectory.setWayPointDurationFromPrevious(i, waypoint_duration.toSec());*/
-
-		/* combine downward and upward motion / sleep pour_duration seconds between */
-		robot_trajectory->append(back_trajectory, pour_duration.toSec());
-
-		trajectory.setTrajectory(robot_trajectory);
-
-		result = scene.diff();
-		result->setCurrentState(robot_trajectory->getLastWayPoint());
-
-		if (path_fraction < min_path_fraction) {
-			ROS_WARN_STREAM("SpreadOver only produced motion for " << path_fraction << " of the way. Rendering invalid");
+		if (!tp_rc) {
+			ROS_WARN_STREAM("IPTP error");
 			trajectory.setCost(std::numeric_limits<double>::infinity());
-			trajectory.setComment("pouring axis angle " + std::to_string(tilt_axis_angle));
+			trajectory.setComment("IPTP time parametrization failed");
 			return;
 		}
 	}

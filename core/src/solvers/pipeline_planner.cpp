@@ -108,6 +108,9 @@ bool PipelinePlanner::plan(const planning_scene::PlanningSceneConstPtr& from,
 	req.goal_constraints[0] = kinematic_constraints::constructGoalConstraints(to->getCurrentState(), jmg,
 	                                                                          props.get<double>("goal_joint_tolerance"));
 	req.path_constraints = path_constraints;
+	// moveit_msgs::Constraints path_constraints_resolved = path_constraints;
+	// kinematic_constraints::resolveConstraintFrames(from->getCurrentState(), path_constraints_resolved);
+	// req.path_constraints = path_constraints_resolved;
 
 	::planning_interface::MotionPlanResponse res;
 	bool success = planner_->generatePlan(from, req, res);
@@ -131,13 +134,17 @@ bool PipelinePlanner::plan(const planning_scene::PlanningSceneConstPtr& from, co
 	req.goal_constraints[0] = kinematic_constraints::constructGoalConstraints(
 	    link.getName(), target, props.get<double>("goal_position_tolerance"),
 	    props.get<double>("goal_orientation_tolerance"));
+
 	req.path_constraints = path_constraints;
+	// moveit_msgs::Constraints path_constraints_resolved = path_constraints;
+	// kinematic_constraints::resolveConstraintFrames(from->getCurrentState(), path_constraints_resolved);
+	// req.path_constraints = path_constraints_resolved;
 
 	::planning_interface::MotionPlanResponse res;
 	bool success = planner_->generatePlan(from, req, res);
 	result = res.trajectory_;
 	return success;
 }
-}
-}
-}
+}  // namespace solvers
+}  // namespace task_constructor
+}  // namespace moveit
