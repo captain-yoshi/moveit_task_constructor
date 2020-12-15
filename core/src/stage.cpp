@@ -631,32 +631,21 @@ template <Interface::Direction other>
 void ConnectingPrivate::newState(Interface::iterator it, bool updated) {
 	// TODO: only consider interface states with priority depth > threshold
 	if (!std::isfinite(it->priority().cost())) {
-		// NOTE fix for issue #182
 		// remove pending pairs, if cost updated to infinity
-		/*
-		      if (updated) {
-		         ROS_DEBUG_STREAM_NAMED("Connecting", name() << ": newState() -> before pending.remove_if() -> pending
-		   size = "
-		                                                     << pending.size());
-		         pending.remove_if([it](const StatePair& p) { return p.first == it; });
-		         ROS_DEBUG_STREAM_NAMED("Connecting", name() << ": newState() -> after pending.remove_if() -> pending siz
-		   = "
-		                                                     << pending.size());
-		      }
-		*/
+		if (updated)
+			pending.remove_if([it](const StatePair& p) { return p.first == it; });
 		return;
 	}
 	if (updated) {
 		// many pairs might be affected: sort
-		// pending.sort();
+		pending.sort();
 	} else {  // new state: insert all pairs with other interface
 		InterfacePtr other_interface = pullInterface(other);
 		for (Interface::iterator oit = other_interface->begin(), oend = other_interface->end(); oit != oend; ++oit) {
 			if (!std::isfinite(oit->priority().cost()))
 				break;
-			if (static_cast<Connecting*>(me_)->compatible(*it, *oit)) {
+			if (static_cast<Connecting*>(me_)->compatible(*it, *oit))
 				pending.insert(make_pair<other>(it, oit));
-			}
 		}
 	}
 }
@@ -685,6 +674,7 @@ bool Connecting::compatible(const InterfaceState& from_state, const InterfaceSta
 	const planning_scene::PlanningSceneConstPtr& to = to_state.scene();
 
 	if (from->getWorld()->size() != to->getWorld()->size()) {
+		ROS_DEBUG_STREAM_NAMED("Connecting", name() << ": different number of collision objects");
 		return false;
 	}
 
@@ -693,6 +683,7 @@ bool Connecting::compatible(const InterfaceState& from_state, const InterfaceSta
 		const collision_detection::World::ObjectPtr& from_object = from_object_pair.second;
 		const collision_detection::World::ObjectConstPtr& to_object = to->getWorld()->getObject(from_object_pair.first);
 		if (!to_object) {
+			ROS_DEBUG_STREAM_NAMED("Connecting", name() << ": object missing: " << from_object_pair.first);
 			return false;
 		}
 		if (from_object->shape_poses_.size() != to_object->shape_poses_.size()) {
@@ -723,7 +714,7 @@ bool Connecting::compatible(const InterfaceState& from_state, const InterfaceSta
 		auto it = std::find_if(to_attached.cbegin(), to_attached.cend(),
 		                       [from_object](const moveit::core::AttachedBody* object) {
 			                       return object->getName() == from_object->getName();
-		                       });
+			                    });
 		if (it == to_attached.cend()) {
 			ROS_DEBUG_STREAM_NAMED("Connecting", name() << ": object missing: " << from_object->getName());
 			return false;
@@ -759,5 +750,5 @@ std::ostream& operator<<(std::ostream& os, const Stage& stage) {
 	os << *stage.pimpl();
 	return os;
 }
-}  // namespace task_constructor
-}  // namespace moveit
+}
+}
