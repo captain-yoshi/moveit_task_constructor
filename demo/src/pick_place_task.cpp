@@ -42,6 +42,15 @@ constexpr char LOGNAME[] = "pick_place_task";
 PickPlaceTask::PickPlaceTask(const std::string& task_name, const ros::NodeHandle& nh)
   : nh_(nh), task_name_(task_name), execute_("execute_task_solution", true) {}
 
+Eigen::Isometry3d createIsomtery3d(double x, double y, double z, double qw, double qx, double qy, double qz) {
+	Eigen::Isometry3d tf = Eigen::Isometry3d::Identity();
+	tf.translate(Eigen::Vector3d(x, y, z));
+
+	Eigen::Quaterniond quat = Eigen::Quaterniond(qw, qx, qy, qz);
+	tf.rotate(quat);
+
+	return tf;
+}
 void PickPlaceTask::loadParameters() {
 	/****************************************************
 	 *                                                  *
@@ -52,34 +61,6 @@ void PickPlaceTask::loadParameters() {
 	ros::NodeHandle pnh("~");
 
 	// Planning group properties
-	size_t errors = 0;
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "arm_group_name", arm_group_name_);
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "hand_group_name", hand_group_name_);
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "eef_name", eef_name_);
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "hand_frame", hand_frame_);
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "world_frame", world_frame_);
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "grasp_frame_transform", grasp_frame_transform_);
-
-	// Predefined pose targets
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "hand_open_pose", hand_open_pose_);
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "hand_close_pose", hand_close_pose_);
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "arm_home_pose", arm_home_pose_);
-
-	// Target object
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "object_name", object_name_);
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "object_dimensions", object_dimensions_);
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "object_reference_frame", object_reference_frame_);
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "surface_link", surface_link_);
-	support_surfaces_ = { surface_link_ };
-
-	// Pick/Place metrics
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "approach_object_min_dist", approach_object_min_dist_);
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "approach_object_max_dist", approach_object_max_dist_);
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "lift_object_min_dist", lift_object_min_dist_);
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "lift_object_max_dist", lift_object_max_dist_);
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "place_surface_offset", place_surface_offset_);
-	errors += !rosparam_shortcuts::get(LOGNAME, pnh, "place_pose", place_pose_);
-	rosparam_shortcuts::shutdownIfError(LOGNAME, errors);
 }
 
 void PickPlaceTask::init() {
@@ -107,6 +88,8 @@ void PickPlaceTask::init() {
 
 	moveit::task_constructor::Stage* current_state_ = nullptr;
 
+	double timeout_ = 0.1;
+	double timeout_connect_ = 5.0;
 	/****************************************************
 	 *                                                  *
 	 *               Grasp pipeline                     *
@@ -117,15 +100,26 @@ void PickPlaceTask::init() {
 		current_state_ = _current_state.get();
 		t.add(std::move(_current_state));
 	}
-	{  // Move Gripper
-		auto stage = std::make_unique<stages::MoveTo>(name, sampling_planner_);
-		stage->setGoal(robot_state);
-		stage->setGroup(group_name);
+	moveit_msgs::RobotState r;
+	{  // Open Gripper
+
+		r.is_diff = true;
+		r.joint_state.name.resize(1);
+		r.joint_state.name[0] = "robotiq_2f_140_left_outer_knuckle_joint";
+		r.joint_state.position.resize(1);
+		r.joint_state.position[0] = 0.43197133851644276;
+
+		r.joint_state.effort.resize(1);
+		r.joint_state.effort[0] = 100000;
+
+		auto stage = std::make_unique<stages::MoveTo>("Open Gripper", sampling_planner_);
+		stage->setGoal(r);
+		stage->setGroup("robotiq_2f_140");
 		t.add(std::move(stage));
 	}
 	{  // Connect
 		auto stage = std::make_unique<stages::Connect>(
-		    "Connect1", stages::Connect::GroupPlannerVector{ { group_name, sampling_planner_ } });
+		    "Connect1", stages::Connect::GroupPlannerVector{ { "left_eef", sampling_planner_ } });
 		stage->setTimeout(timeout_connect_);
 		stage->properties().configureInitFrom(Stage::PARENT);
 		t.add(std::move(stage));
@@ -133,16 +127,61 @@ void PickPlaceTask::init() {
 	{  // Alternatives + GenerateGraspPose
 		auto parallel_container = std::make_unique<Alternatives>("Alternatives grasp container");
 
-		for (int i = 0; i < size; ++i) {
-			auto stage = std::make_unique<stages::GenerateGraspPose>(name);
+		std::string arm_group_name = "left_eef";
+		std::string eef_name = "gripper";
+		std::string tcp_frame_name = "robotiq_2f_140";
+
+		std::string target_frame_name = "stylus";
+		int max_ik_solutions = 8;
+
+		std::vector<Eigen::Isometry3d> target_frame_list;
+		std::vector<Eigen::Vector3d> target_axis_list;
+		std::vector<double> target_angle_delta_list;
+		std::vector<moveit_msgs::RobotState> pre_grasp_state_list;
+
+		int pose_nb = 4;
+
+		Eigen::Isometry3d dst_frame = createIsomtery3d(0, 0, 0.06, 0.707107, 0, -0.707107, 0);
+		Eigen::Isometry3d frame = dst_frame;
+		Eigen::Isometry3d tcp_frame = createIsomtery3d(-0.000323486, 0, 0, 1, 0, 0, 0);
+
+		std::vector<double> delta_lengths;
+		delta_lengths.push_back(0);
+		delta_lengths.push_back(0.0089999999999999993);
+		delta_lengths.push_back(-0.0089999999999999993);
+
+		std::vector<double> delta_heights;
+		delta_heights.push_back(0);
+		delta_heights.push_back(0.014999999999999999);
+		delta_heights.push_back(-0.014999999999999999);
+
+		for (int i = 0; i < pose_nb; ++i) {
+			for (const auto& curr_length : delta_lengths) {
+				frame = dst_frame;
+				frame.translate(Eigen::Vector3d(0, 0, curr_length));
+				for (const auto& curr_height : delta_heights) {
+					Eigen::Isometry3d frame2 = frame;
+					frame2.translate(Eigen::Vector3d(curr_height, 0, 0));
+
+					frame2 = frame2 * Eigen::AngleAxisd(i * 1.5707963267948966, Eigen::Vector3d(1, 0, 0));
+
+					target_frame_list.push_back(frame2);
+					target_axis_list.push_back(Eigen::Vector3d::UnitY());
+					target_angle_delta_list.push_back(2.0 * M_PI / 8.0);
+					pre_grasp_state_list.push_back(r);
+				}
+			}
+		}
+		for (int i = 0; i < target_frame_list.size(); ++i) {
+			auto stage = std::make_unique<stages::GenerateGraspPose>("Generate grasp pose");
 			stage->properties().configureInitFrom(Stage::PARENT);
 			stage->setEndEffector(eef_name);
 			stage->setObject(target_frame_name);
-			stage->setObjectPose(target_frame[i]);
-			stage->setAngleDelta(target_angle_delta[i]);
-			stage->setAngleAxis(target_axis[i]);
+			stage->setObjectPose(target_frame_list[i]);
+			stage->setAngleDelta(target_angle_delta_list[i]);
+			stage->setAngleAxis(target_axis_list[i]);
 			stage->setEndEffector(eef_name);
-			stage->setPreGraspPose(pre_grasp_state[i]);
+			stage->setPreGraspPose(pre_grasp_state_list[i]);
 			stage->setTimeout(timeout_);
 			stage->setMonitoredStage(current_state_);
 
@@ -158,27 +197,66 @@ void PickPlaceTask::init() {
 		}
 		t.add(std::move(parallel_container));
 	}
+
+	{  // Close Gripper
+		auto stage = std::make_unique<stages::MoveTo>("Close Gripper", sampling_planner_);
+		r.is_diff = true;
+		r.joint_state.name.resize(1);
+		r.joint_state.name[0] = "robotiq_2f_140_left_outer_knuckle_joint";
+		r.joint_state.position.resize(1);
+		r.joint_state.position[0] = 0.63634669853952763;
+
+		r.joint_state.effort.resize(1);
+		r.joint_state.effort[0] = 100000;
+
+		stage->setGoal(r);
+		stage->setGroup("robotiq_2f_140");
+		t.add(std::move(stage));
+	}
 	{  // Allow collisions
-		auto stage = std::make_unique<stages::ModifyPlanningScene>(name);
+		auto stage = std::make_unique<stages::ModifyPlanningScene>("Allow Collisions");
+		stage->allowCollisions("support_tool_rack", "stylus", true);
+		stage->properties().configureInitFrom(Stage::PARENT);
+		t.add(std::move(stage));
+	}
+	{  // Allow collisions
+		auto stage = std::make_unique<stages::ModifyPlanningScene>("Allow Collisions");
+		stage->allowCollisions("stylus", "stylus", true);
+		stage->properties().configureInitFrom(Stage::PARENT);
+		t.add(std::move(stage));
+	}
+	{  // Allow collisions
+		auto stage = std::make_unique<stages::ModifyPlanningScene>("Allow Collisions");
 		stage->allowCollisions(
-		    first_, task_->getRobotModel()->getJointModelGroup(second_)->getLinkModelNamesWithCollisionGeometry(), flag);
+		    "stylus",
+		    task_->getRobotModel()->getJointModelGroup("robotiq_2f_140")->getLinkModelNamesWithCollisionGeometry(), true);
 		stage->properties().configureInitFrom(Stage::PARENT);
 		t.add(std::move(stage));
 	}
 	{  // Attach object
-		auto stage = std::make_unique<stages::ModifyPlanningScene>(name);
-		stage->attachObjects(objects, link_name, flag);
+		auto stage = std::make_unique<stages::ModifyPlanningScene>("Attach object to Gripper");
+		stage->attachObjects(std::vector<std::string>{ "stylus" }, "robotiq_2f_140_tcp", true);
 		current_state_ = stage.get();
 		t.add(std::move(stage));
 	}
-	{  // Move relative up wrt object insertion
-		auto stage = std::make_unique<stages::MoveRelative>(name, cartesian_planner_);
-		const geometry_msgs::Vector3Stamped& direction = boost::any_cast<geometry_msgs::Vector3Stamped>(direction_any);
+	{  // Move relative up wrt object insertio
+		geometry_msgs::Vector3Stamped direction = geometry_msgs::Vector3Stamped();
+		direction.header.frame_id = "stylus";
+		direction.vector.x = -0.070390000000000008;
+
+		auto stage = std::make_unique<stages::MoveRelative>("Move relative", cartesian_planner_);
+
 		stage->setDirection(direction);
-		stage->setMinMaxDistance(min_distance, max_distance);
-		stage->properties().set("link", tcp_frame_name);
-		stage->setGroup(group_name);
-		stage->setPoseTransform(tcp_frame);
+		stage->setMinMaxDistance(-1, 0);
+		stage->properties().set("link", "stylus");
+		stage->setGroup("left_eef");
+		stage->setPoseTransform(createIsomtery3d(0, 0, 0, 0, 0.707107, 0, -0.707107));
+		{  // Allow collisions
+			auto stage = std::make_unique<stages::ModifyPlanningScene>("Allow Collisions");
+			stage->allowCollisions("support_tool_rack", "stylus", true);
+			stage->properties().configureInitFrom(Stage::PARENT);
+			t.add(std::move(stage));
+		}
 		stage->setTimeout(timeout_);
 		t.add(std::move(stage));
 	}
@@ -190,13 +268,25 @@ void PickPlaceTask::init() {
 	 ***************************************************/
 	{  // Second Connect
 		auto stage = std::make_unique<stages::Connect>(
-		    "Connect2", stages::Connect::GroupPlannerVector{ { group_name, sampling_planner_ } });
+		    "Connect2", stages::Connect::GroupPlannerVector{ { "left_eef", sampling_planner_ } });
 		stage->setTimeout(timeout_connect_);
 		stage->properties().configureInitFrom(Stage::PARENT);
 		t.add(std::move(stage));
 	}
+
 	{  // GenerateInsertionPose this stage is identical to the generateGraspPose except that it dosent need a hand_state
-		auto stage = std::make_unique<stages::GenerateInsertPose>(name);
+		std::string eef_name = "gripper";
+		std::string target_frame_name = "transporator";
+		std::string tcp_frame_name = "stylus";
+		std::string arm_group_name = "left_eef";
+
+		double target_angle_delta = 0.78539816339744828;
+		Eigen::Vector3d target_axis = Eigen::Vector3d(1, 0, 0);
+
+		Eigen::Isometry3d tcp_frame = createIsomtery3d(0, 0, 0, 0, 0.707107, 0, -0.707107);
+		Eigen::Isometry3d target_frame = createIsomtery3d(0.06074, -0.17265, 0.05685, 0.5, -0.5, -0.5, 0.5);
+
+		auto stage = std::make_unique<stages::GenerateInsertPose>("Generate Insert Pose");
 		stage->properties().configureInitFrom(Stage::PARENT);
 		stage->setEndEffector(eef_name);
 		stage->setObject(target_frame_name);
@@ -217,43 +307,63 @@ void PickPlaceTask::init() {
 		wrapper->setProperty("group", arm_group_name);
 		t.add(std::move(wrapper));
 	}
-	{  // Allow collisions
-		auto stage = std::make_unique<stages::ModifyPlanningScene>(name);
-		stage->allowCollisions(
-		    first_, task_->getRobotModel()->getJointModelGroup(second_)->getLinkModelNamesWithCollisionGeometry(), flag);
+
+	{  // 2- Allow collisions: tool_attached_objects -> dst_object
+		auto stage = std::make_unique<stages::ModifyPlanningScene>("Allow Collision");
+		stage->allowCollisions("stylus", "transporator", true);
 		stage->properties().configureInitFrom(Stage::PARENT);
 		t.add(std::move(stage));
 	}
+
+	{  // Allow collisions
+		auto stage = std::make_unique<stages::ModifyPlanningScene>("Allow Collision");
+		stage->allowCollisions(
+		    "transporator",
+		    task_->getRobotModel()->getJointModelGroup("robotiq_2f_140")->getLinkModelNamesWithCollisionGeometry(), true);
+		stage->properties().configureInitFrom(Stage::PARENT);
+		t.add(std::move(stage));
+	}
+
 	{  // Move relative Push button
-		auto stage = std::make_unique<stages::MoveRelative>(name, cartesian_planner_);
-		const geometry_msgs::Vector3Stamped& direction = boost::any_cast<geometry_msgs::Vector3Stamped>(direction_any);
+		geometry_msgs::Vector3Stamped direction = geometry_msgs::Vector3Stamped();
+		direction.header.frame_id = "stylus";
+		direction.vector.x = 0.017999999999999999;
+		Eigen::Isometry3d tcp_frame = createIsomtery3d(0, 0, 0, 0, 0.707107, 0, -0.707107);
+
+		auto stage = std::make_unique<stages::MoveRelative>("Move relative", cartesian_planner_);
 		stage->setDirection(direction);
-		stage->setMinMaxDistance(min_distance, max_distance);
-		stage->properties().set("link", tcp_frame_name);
-		stage->setGroup(group_name);
+		stage->setMinMaxDistance(-1, 0);
+		stage->properties().set("link", "stylus");
+		stage->setGroup("left_eef");
 		stage->setPoseTransform(tcp_frame);
 		stage->setTimeout(timeout_);
 		t.add(std::move(stage));
 	}
 
 	{  // Move relative Retreat
-		auto stage = std::make_unique<stages::MoveRelative>(name, cartesian_planner_);
-		const geometry_msgs::Vector3Stamped& direction = boost::any_cast<geometry_msgs::Vector3Stamped>(direction_any);
+		geometry_msgs::Vector3Stamped direction = geometry_msgs::Vector3Stamped();
+		direction.header.frame_id = "stylus";
+		direction.vector.x = -0.017999999999999999;
+		Eigen::Isometry3d tcp_frame = createIsomtery3d(0, 0, 0, 0, 0.707107, 0, -0.707107);
+
+		auto stage = std::make_unique<stages::MoveRelative>("Move relative", cartesian_planner_);
 		stage->setDirection(direction);
-		stage->setMinMaxDistance(min_distance, max_distance);
-		stage->properties().set("link", tcp_frame_name);
-		stage->setGroup(group_name);
+		stage->setMinMaxDistance(-1, 0);
+		stage->properties().set("link", "stylus");
+		stage->setGroup("left_eef");
 		stage->setPoseTransform(tcp_frame);
 		stage->setTimeout(timeout_);
 		t.add(std::move(stage));
 	}
-	{  // Frobid collisions
-		auto stage = std::make_unique<stages::ModifyPlanningScene>(name);
-		stage->allowCollisions(
-		    first_, task_->getRobotModel()->getJointModelGroup(second_)->getLinkModelNamesWithCollisionGeometry(), flag);
-		stage->properties().configureInitFrom(Stage::PARENT);
-		t.add(std::move(stage));
-	}
+
+	/*
+	   {  // Frobid collisions
+	      auto stage = std::make_unique<stages::ModifyPlanningScene>(name);
+	      stage->allowCollisions(
+	          first_, task_->getRobotModel()->getJointModelGroup(second_)->getLinkModelNamesWithCollisionGeometry(),
+	   flag); stage->properties().configureInitFrom(Stage::PARENT); t.add(std::move(stage));
+	   }
+	*/
 }
 
 bool PickPlaceTask::plan() {

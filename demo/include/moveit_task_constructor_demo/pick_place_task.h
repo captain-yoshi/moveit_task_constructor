@@ -52,6 +52,7 @@
 #include <moveit/task_constructor/stages/generate_place_pose.h>
 #include <moveit/task_constructor/stages/modify_planning_scene.h>
 #include <moveit/task_constructor/stages/move_relative.h>
+#include <moveit/task_constructor/stages/generate_insert_pose.h>
 #include <moveit/task_constructor/stages/move_to.h>
 #include <moveit/task_constructor/stages/predicate_filter.h>
 #include <moveit/task_constructor/solvers/cartesian_path.h>
@@ -121,4 +122,4 @@ private:
 	geometry_msgs::Pose place_pose_;
 	double place_surface_offset_;
 };
-}  // moveit_task_constructor_demo
+}  // namespace moveit_task_constructor_demo
