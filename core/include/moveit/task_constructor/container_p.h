@@ -49,8 +49,8 @@ namespace moveit {
 namespace core {
 MOVEIT_CLASS_FORWARD(JointModelGroup)
 MOVEIT_CLASS_FORWARD(RobotState)
-}
-}
+}  // namespace core
+}  // namespace moveit
 
 namespace moveit {
 namespace task_constructor {
@@ -75,10 +75,10 @@ class ContainerBasePrivate : public StagePrivate
 	friend void swap(StagePrivate*& lhs, StagePrivate*& rhs);
 
 public:
-	typedef StagePrivate::container_type container_type;
-	typedef container_type::iterator iterator;
-	typedef container_type::const_iterator const_iterator;
-	typedef std::function<bool(Stage&, int depth)> NonConstStageCallback;
+	using container_type = StagePrivate::container_type;
+	using iterator = container_type::iterator;
+	using const_iterator = container_type::const_iterator;
+	using NonConstStageCallback = std::function<bool(Stage&, int)>;
 
 	inline const container_type& children() const { return children_; }
 
@@ -89,7 +89,7 @@ public:
 	const_iterator childByIndex(int index, bool for_insert = false) const;
 
 	/// remove child at given iterator position, returns fals if pos is invalid
-	bool remove(ContainerBasePrivate::const_iterator pos);
+	Stage::pointer remove(ContainerBasePrivate::const_iterator pos);
 
 	/// traversing all stages up to max_depth
 	bool traverseStages(const ContainerBase::StageCallback& processor, unsigned int cur_depth,
@@ -134,7 +134,8 @@ protected:
 	/// copy external_state to a child's interface and remember the link in internal_to map
 	void copyState(Interface::iterator external, const InterfacePtr& target, bool updated);
 	/// lift solution from internal to external level
-	void liftSolution(SolutionBasePtr solution, const InterfaceState* internal_from, const InterfaceState* internal_to);
+	void liftSolution(const SolutionBasePtr& solution, const InterfaceState* internal_from,
+	                  const InterfaceState* internal_to);
 
 	auto& internalToExternalMap() { return internal_to_external_; }
 	const auto& internalToExternalMap() const { return internal_to_external_; }
@@ -186,27 +187,6 @@ protected:
 };
 PIMPL_FUNCTIONS(SerialContainer)
 
-/** Wrap an existing solution - for use in parallel containers and wrappers.
- *
- * This essentially wraps a solution of a child and thus allows
- * for new clones of start / end states, which in turn will
- * have separate incoming/outgoing trajectories */
-class WrappedSolution : public SolutionBase
-{
-public:
-	explicit WrappedSolution(StagePrivate* creator, const SolutionBase* wrapped, double cost, std::string comment)
-	  : SolutionBase(creator, cost, std::move(comment)), wrapped_(wrapped) {}
-	explicit WrappedSolution(StagePrivate* creator, const SolutionBase* wrapped, double cost)
-	  : SolutionBase(creator, cost), wrapped_(wrapped) {}
-	explicit WrappedSolution(StagePrivate* creator, const SolutionBase* wrapped)
-	  : WrappedSolution(creator, wrapped, wrapped->cost()) {}
-	void fillMessage(moveit_task_constructor_msgs::Solution& solution,
-	                 Introspection* introspection = nullptr) const override;
-
-private:
-	const SolutionBase* wrapped_;
-};
-
 class ParallelContainerBasePrivate : public ContainerBasePrivate
 {
 	friend class ParallelContainerBase;
@@ -242,13 +222,13 @@ class MergerPrivate : public ParallelContainerBasePrivate
 	friend class Merger;
 
 	moveit::core::JointModelGroupPtr jmg_merged_;
-	typedef std::vector<const SubTrajectory*> ChildSolutionList;
-	typedef std::map<const StagePrivate*, ChildSolutionList> ChildSolutionMap;
+	using ChildSolutionList = std::vector<const SubTrajectory*>;
+	using ChildSolutionMap = std::map<const Stage*, ChildSolutionList>;
 	// map from external source state (iterator) to all corresponding children's solutions
 	std::map<InterfaceState*, ChildSolutionMap> source_state_to_solutions_;
 
 public:
-	typedef std::function<void(SubTrajectory&&)> Spawner;
+	using Spawner = std::function<void(SubTrajectory&&)>;
 	MergerPrivate(Merger* me, const std::string& name);
 
 	void resolveInterface(InterfaceFlags expected) override;
@@ -264,5 +244,5 @@ public:
 	void sendBackward(SubTrajectory&& t, const InterfaceState* to);
 };
 PIMPL_FUNCTIONS(Merger)
-}
-}
+}  // namespace task_constructor
+}  // namespace moveit

@@ -97,7 +97,12 @@ std::ostream& operator<<(std::ostream& os, const InitStageException& e) {
 }
 
 StagePrivate::StagePrivate(Stage* me, const std::string& name)
-  : me_(me), name_(name), total_compute_time_{}, parent_(nullptr), introspection_(nullptr) {}
+  : me_{ me }
+  , name_{ name }
+  , cost_term_{ std::make_unique<CostTerm>() }
+  , total_compute_time_{}
+  , parent_{ nullptr }
+  , introspection_{ nullptr } {}
 
 InterfaceFlags StagePrivate::interfaceFlags() const {
 	InterfaceFlags f;
@@ -125,7 +130,7 @@ void StagePrivate::validateConnectivity() const {
 }
 
 bool StagePrivate::storeSolution(const SolutionBasePtr& solution) {
-	solution->setCreator(this);
+	solution->setCreator(me());
 	if (introspection_)
 		introspection_->registerSolution(*solution);
 
@@ -140,14 +145,19 @@ bool StagePrivate::storeSolution(const SolutionBasePtr& solution) {
 	return true;
 }
 
-void StagePrivate::sendForward(const InterfaceState& from, InterfaceState&& to, SolutionBasePtr solution) {
+void StagePrivate::sendForward(const InterfaceState& from, InterfaceState&& to, const SolutionBasePtr& solution) {
 	assert(nextStarts());
+
+	computeCost(from, to, *solution);
+
 	if (!storeSolution(solution))
 		return;  // solution dropped
+
 	me()->forwardProperties(from, to);
 
 	auto to_it = states_.insert(states_.end(), std::move(to));
 
+	// register stored interfaces with solution
 	solution->setStartState(from);
 	solution->setEndState(*to_it);
 
@@ -157,10 +167,14 @@ void StagePrivate::sendForward(const InterfaceState& from, InterfaceState&& to, 
 	newSolution(solution);
 }
 
-void StagePrivate::sendBackward(InterfaceState&& from, const InterfaceState& to, SolutionBasePtr solution) {
+void StagePrivate::sendBackward(InterfaceState&& from, const InterfaceState& to, const SolutionBasePtr& solution) {
 	assert(prevEnds());
+
+	computeCost(from, to, *solution);
+
 	if (!storeSolution(solution))
 		return;  // solution dropped
+
 	me()->forwardProperties(to, from);
 
 	auto from_it = states_.insert(states_.end(), std::move(from));
@@ -174,8 +188,11 @@ void StagePrivate::sendBackward(InterfaceState&& from, const InterfaceState& to,
 	newSolution(solution);
 }
 
-void StagePrivate::spawn(InterfaceState&& state, SolutionBasePtr solution) {
+void StagePrivate::spawn(InterfaceState&& state, const SolutionBasePtr& solution) {
 	assert(prevEnds() && nextStarts());
+
+	computeCost(state, state, *solution);
+
 	if (!storeSolution(solution))
 		return;  // solution dropped
 
@@ -193,7 +210,9 @@ void StagePrivate::spawn(InterfaceState&& state, SolutionBasePtr solution) {
 	newSolution(solution);
 }
 
-void StagePrivate::connect(const InterfaceState& from, const InterfaceState& to, SolutionBasePtr solution) {
+void StagePrivate::connect(const InterfaceState& from, const InterfaceState& to, const SolutionBasePtr& solution) {
+	computeCost(from, to, *solution);
+
 	if (!storeSolution(solution))
 		return;  // solution dropped
 
@@ -210,6 +229,45 @@ void StagePrivate::newSolution(const SolutionBasePtr& solution) {
 
 	if (parent() && !solution->isFailure())
 		parent()->onNewSolution(*solution);
+}
+
+// To solve the chicken-egg problem in computeCost() and provide proper states at both ends of the solution,
+// this class temporarily sets the new interface states w/o registering the solution yet.
+// On destruction the start/end states are reset again.
+struct TmpInterfaceStateProvider
+{
+	SolutionBase* solution_;
+	TmpInterfaceStateProvider(SolutionBase& solution, const InterfaceState& from, const InterfaceState& to)
+	  : solution_(&solution) {
+		assert(solution_->start_ == nullptr);
+		assert(solution_->end_ == nullptr);
+		solution_->start_ = &from;
+		solution_->end_ = &to;
+	}
+	~TmpInterfaceStateProvider() {
+		solution_->start_ = nullptr;
+		solution_->end_ = nullptr;
+	}
+};
+void StagePrivate::computeCost(const InterfaceState& from, const InterfaceState& to, SolutionBase& solution) {
+	// no reason to compute costs for a failed solution
+	if (solution.isFailure())
+		return;
+
+	// Temporarily set start/end states of the solution w/o actually registering the solution with them
+	// This allows CostTerms to compute costs based on the InterfaceState.
+	TmpInterfaceStateProvider tip(solution, from, to);
+
+	std::string comment;
+	assert(cost_term_);
+	solution.setCost(solution.computeCost(*cost_term_, comment));
+
+	// If a comment was specified, add it to the solution
+	if (!comment.empty() && !solution.comment().empty()) {
+		solution.setComment(solution.comment() + " (" + comment + ")");
+	} else if (!comment.empty()) {
+		solution.setComment(comment);
+	}
 }
 
 Stage::Stage(StagePrivate* impl) : pimpl_(impl) {
@@ -253,9 +311,10 @@ void Stage::reset() {
 	impl->properties_.reset();
 }
 
-void Stage::init(const moveit::core::RobotModelConstPtr& robot_model) {
-	// init properties once from parent
+void Stage::init(const moveit::core::RobotModelConstPtr& /* robot_model */) {
 	auto impl = pimpl();
+
+	// init properties once from parent
 	impl->properties_.reset();
 	if (impl->parent()) {
 		try {
@@ -283,6 +342,12 @@ void Stage::setName(const std::string& name) {
 	pimpl_->name_ = name;
 }
 
+uint32_t Stage::introspectionId() const {
+	if (!pimpl_->introspection_)
+		throw std::runtime_error("Task is not initialized yet or Introspection was disabled.");
+	return const_cast<const moveit::task_constructor::Introspection*>(pimpl_->introspection_)->stageId(this);
+}
+
 void Stage::forwardProperties(const InterfaceState& source, InterfaceState& dest) {
 	const PropertyMap& src = source.properties();
 	PropertyMap& dst = dest.properties();
@@ -300,6 +365,13 @@ Stage::SolutionCallbackList::const_iterator Stage::addSolutionCallback(SolutionC
 }
 void Stage::removeSolutionCallback(SolutionCallbackList::const_iterator which) {
 	pimpl()->solution_cbs_.erase(which);
+}
+
+void Stage::setCostTerm(const CostTermConstPtr& term) {
+	if (!term)
+		pimpl()->cost_term_ = std::make_unique<CostTerm>();
+	else
+		pimpl()->cost_term_ = term;
 }
 
 const ordered<SolutionBaseConstPtr>& Stage::solutions() const {
@@ -404,15 +476,14 @@ void PropagatingEitherWayPrivate::initInterface(PropagatingEitherWay::Direction 
 		case PropagatingEitherWay::FORWARD:
 			required_interface_ = PROPAGATE_FORWARDS;
 			if (!starts_)  // keep existing interface if possible
-				starts_.reset(
-				    new Interface([this](Interface::iterator it, bool /*updated*/) { this->dropFailedStarts(it); }));
+				starts_.reset(new Interface());
 			ends_.reset();
 			return;
 		case PropagatingEitherWay::BACKWARD:
 			required_interface_ = PROPAGATE_BACKWARDS;
 			starts_.reset();
 			if (!ends_)  // keep existing interface if possible
-				ends_.reset(new Interface([this](Interface::iterator it, bool /*updated*/) { this->dropFailedEnds(it); }));
+				ends_.reset(new Interface());
 			return;
 		case PropagatingEitherWay::AUTO:
 			required_interface_ = UNKNOWN;
@@ -445,15 +516,6 @@ void PropagatingEitherWayPrivate::resolveInterface(InterfaceFlags expected) {
 
 InterfaceFlags PropagatingEitherWayPrivate::requiredInterface() const {
 	return required_interface_;
-}
-
-void PropagatingEitherWayPrivate::dropFailedStarts(Interface::iterator state) {
-	if (std::isinf(state->priority().cost()))
-		starts_->remove(state);
-}
-void PropagatingEitherWayPrivate::dropFailedEnds(Interface::iterator state) {
-	if (std::isinf(state->priority().cost()))
-		ends_->remove(state);
 }
 
 inline bool PropagatingEitherWayPrivate::hasStartState() const {
@@ -619,33 +681,18 @@ InterfaceFlags ConnectingPrivate::requiredInterface() const {
 template <>
 ConnectingPrivate::StatePair ConnectingPrivate::make_pair<Interface::BACKWARD>(Interface::const_iterator first,
                                                                                Interface::const_iterator second) {
-	return std::make_pair(first, second);
+	return StatePair(first, second);
 }
 template <>
 ConnectingPrivate::StatePair ConnectingPrivate::make_pair<Interface::FORWARD>(Interface::const_iterator first,
                                                                               Interface::const_iterator second) {
-	return std::make_pair(second, first);
+	return StatePair(second, first);
 }
 
 template <Interface::Direction other>
 void ConnectingPrivate::newState(Interface::iterator it, bool updated) {
-	// TODO: only consider interface states with priority depth > threshold
-	if (!std::isfinite(it->priority().cost())) {
-		// NOTE fix for issue #182
-		// remove pending pairs, if cost updated to infinity
-		/*
-		      if (updated) {
-		         ROS_DEBUG_STREAM_NAMED("Connecting", name() << ": newState() -> before pending.remove_if() -> pending
-		   size = "
-		                                                     << pending.size());
-		         pending.remove_if([it](const StatePair& p) { return p.first == it; });
-		         ROS_DEBUG_STREAM_NAMED("Connecting", name() << ": newState() -> after pending.remove_if() -> pending siz
-		   = "
-		                                                     << pending.size());
-		      }
-		*/
+	if (!std::isfinite(it->priority().cost()))
 		return;
-	}
 	if (updated) {
 		// many pairs might be affected: sort
 		// pending.sort();
@@ -669,6 +716,7 @@ void ConnectingPrivate::compute() {
 	const StatePair& top = pending.pop();
 	const InterfaceState& from = *top.first;
 	const InterfaceState& to = *top.second;
+	assert(std::isfinite((from.priority() + to.priority()).cost()));
 	static_cast<Connecting*>(me_)->compute(from, to);
 }
 
@@ -751,7 +799,7 @@ bool Connecting::compatible(const InterfaceState& from_state, const InterfaceSta
 	return true;
 }
 
-void Connecting::connect(const InterfaceState& from, const InterfaceState& to, SolutionBasePtr s) {
+void Connecting::connect(const InterfaceState& from, const InterfaceState& to, const SolutionBasePtr& s) {
 	pimpl()->connect(from, to, s);
 }
 

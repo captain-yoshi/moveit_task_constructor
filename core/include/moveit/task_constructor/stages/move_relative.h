@@ -48,7 +48,7 @@ namespace moveit {
 namespace core {
 class RobotState;
 }
-}
+}  // namespace moveit
 namespace moveit {
 namespace task_constructor {
 namespace stages {
@@ -106,6 +106,6 @@ protected:
 protected:
 	solvers::PlannerInterfacePtr planner_;
 };
-}
-}
-}
+}  // namespace stages
+}  // namespace task_constructor
+}  // namespace moveit

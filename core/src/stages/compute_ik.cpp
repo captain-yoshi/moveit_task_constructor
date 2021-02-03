@@ -82,8 +82,8 @@ void ComputeIK::setTargetPose(const Eigen::Isometry3d& pose, const std::string& 
 	setTargetPose(pose_msg);
 }
 
-// found IK solutions with a flag indicating validity
-typedef std::vector<std::vector<double>> IKSolutions;
+// found IK solutions
+using IKSolutions = std::vector<std::vector<double>>;
 
 namespace {
 
@@ -360,9 +360,9 @@ void ComputeIK::compute_() {
 	double min_solution_distance = props.get<double>("min_solution_distance");
 
 	IKSolutions ik_solutions;
-	auto isValid = [sandbox_scene, ignore_collisions, min_solution_distance,
-	                &ik_solutions](robot_state::RobotState* state, const robot_model::JointModelGroup* jmg,
-	                               const double* joint_positions) {
+	auto is_valid = [sandbox_scene, ignore_collisions, min_solution_distance,
+	                 &ik_solutions](robot_state::RobotState* state, const robot_model::JointModelGroup* jmg,
+	                                const double* joint_positions) {
 		for (const auto& sol : ik_solutions) {
 			if (jmg->distance(joint_positions, sol.data()) < min_solution_distance)
 				return false;  // too close to already found solution
@@ -385,7 +385,7 @@ void ComputeIK::compute_() {
 		tried_current_state_as_seed = true;
 
 		size_t previous = ik_solutions.size();
-		bool succeeded = sandbox_state.setFromIK(jmg, target_pose, link->getName(), remaining_time, isValid);
+		bool succeeded = sandbox_state.setFromIK(jmg, target_pose, link->getName(), remaining_time, is_valid);
 
 		auto now = std::chrono::steady_clock::now();
 		remaining_time -= std::chrono::duration<double>(now - start_time).count();

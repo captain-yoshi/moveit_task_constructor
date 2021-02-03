@@ -76,7 +76,7 @@ const moveit::core::JointModelGroup* findJointModelGroup(const moveit::core::Rob
 
 	return nullptr;
 }
-}
+}  // namespace
 
 namespace move_group {
 
@@ -151,7 +151,7 @@ bool ExecuteTaskSolutionCapability::constructMotionPlan(const moveit_task_constr
 			std::vector<std::string> joint_names(sub_traj.trajectory.joint_trajectory.joint_names);
 			joint_names.insert(joint_names.end(), sub_traj.trajectory.multi_dof_joint_trajectory.joint_names.begin(),
 			                   sub_traj.trajectory.multi_dof_joint_trajectory.joint_names.end());
-			if (joint_names.size()) {
+			if (!joint_names.empty()) {
 				group = findJointModelGroup(*model, joint_names);
 				if (!group) {
 					ROS_ERROR_STREAM_NAMED("ExecuteTaskSolution", "Could not find JointModelGroup that actuates {"
@@ -166,7 +166,8 @@ bool ExecuteTaskSolutionCapability::constructMotionPlan(const moveit_task_constr
 		exec_traj.trajectory_->setRobotTrajectoryMsg(state, sub_traj.trajectory);
 
 		/* TODO add action feedback and markers */
-		exec_traj.effect_on_success_ = [this, sub_traj, description](const plan_execution::ExecutableMotionPlan*) {
+		exec_traj.effect_on_success_ = [this, sub_traj,
+		                                description](const plan_execution::ExecutableMotionPlan* /*plan*/) {
 #if MOVEIT_MASTER
 			if (!moveit::core::isEmpty(sub_traj.scene_diff)) {
 #else

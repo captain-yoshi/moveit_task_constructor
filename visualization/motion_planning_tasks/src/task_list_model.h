@@ -2,6 +2,7 @@
  * Software License Agreement (BSD License)
  *
  *  Copyright (c) 2017, Bielefeld University
+ *  Copyright (c) 2020, Hamburg University
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -41,29 +42,28 @@
 #include <utils/flat_merge_proxy_model.h>
 
 #include <moveit/macros/class_forward.h>
+#include <ros/node_handle.h>
 #include <moveit_task_constructor_msgs/TaskDescription.h>
 #include <moveit_task_constructor_msgs/TaskStatistics.h>
 #include <moveit_task_constructor_msgs/Solution.h>
 
 #include <QAbstractItemModel>
 #include <QTreeView>
+#include <QTableView>
 #include <memory>
 #include <QPointer>
 
-namespace ros {
-class ServiceClient;
-}
 namespace rviz {
 class PropertyTreeModel;
 class DisplayContext;
-}
+}  // namespace rviz
 
 namespace moveit_rviz_plugin {
 
 MOVEIT_CLASS_FORWARD(DisplaySolution)
 MOVEIT_CLASS_FORWARD(RemoteTaskModel)
-typedef PluginlibFactory<moveit::task_constructor::Stage> StageFactory;
-typedef std::shared_ptr<StageFactory> StageFactoryPtr;
+using StageFactory = PluginlibFactory<moveit::task_constructor::Stage>;
+using StageFactoryPtr = std::shared_ptr<StageFactory>;
 
 StageFactoryPtr getStageFactory();
 
@@ -94,7 +94,6 @@ public:
 	QVariant data(const QModelIndex& index, int role) const override;
 
 	virtual void setStageFactory(const StageFactoryPtr& factory) {}
-	Qt::ItemFlags flags(const QModelIndex& index) const override;
 	unsigned int taskFlags() const { return flags_; }
 	static QVariant flowIcon(moveit::task_constructor::InterfaceFlags f);
 
@@ -127,11 +126,12 @@ class TaskListModel : public utils::FlatMergeProxyModel
 	// rviz::DisplayContext used to show (interactive) markers by the property models
 	rviz::DisplayContext* display_context_ = nullptr;
 
-	// map from remote task IDs to tasks
+	// map from remote task IDs to (active) tasks
 	// if task is destroyed remotely, it is marked with flag IS_DESTROYED
 	// if task is removed locally from tasks vector, it is marked with a nullptr
 	std::map<std::string, RemoteTaskModel*> remote_tasks_;
-	ros::ServiceClient* get_solution_client_ = nullptr;
+	// mode reflecting the "Old task handling" setting
+	int old_task_handling_;
 
 	// factory used to create stages
 	StageFactoryPtr stage_factory_;
@@ -143,11 +143,10 @@ class TaskListModel : public utils::FlatMergeProxyModel
 
 public:
 	TaskListModel(QObject* parent = nullptr);
-	~TaskListModel();
+	~TaskListModel() override;
 
 	void setScene(const planning_scene::PlanningSceneConstPtr& scene);
 	void setDisplayContext(rviz::DisplayContext* display_context);
-	void setSolutionClient(ros::ServiceClient* client);
 	void setActiveTaskModel(BaseTaskModel* model) { active_task_model_ = model; }
 
 	int columnCount(const QModelIndex& parent = QModelIndex()) const override { return 4; }
@@ -156,11 +155,12 @@ public:
 	QVariant data(const QModelIndex& index, int role) const override;
 
 	/// process an incoming task description message - only call in Qt's main loop
-	void processTaskDescriptionMessage(const std::string& id, const moveit_task_constructor_msgs::TaskDescription& msg);
+	void processTaskDescriptionMessage(const moveit_task_constructor_msgs::TaskDescription& msg, ros::NodeHandle& nh,
+	                                   const std::string& service_name);
 	/// process an incoming task description message - only call in Qt's main loop
-	void processTaskStatisticsMessage(const std::string& id, const moveit_task_constructor_msgs::TaskStatistics& msg);
+	void processTaskStatisticsMessage(const moveit_task_constructor_msgs::TaskStatistics& msg);
 	/// process an incoming solution message - only call in Qt's main loop
-	DisplaySolutionPtr processSolutionMessage(const std::string& id, const moveit_task_constructor_msgs::Solution& msg);
+	DisplaySolutionPtr processSolutionMessage(const moveit_task_constructor_msgs::Solution& msg);
 
 	/// insert a TaskModel, pos is relative to modelCount()
 	bool insertModel(BaseTaskModel* model, int pos = -1);
@@ -174,38 +174,41 @@ public:
 	Qt::DropActions supportedDropActions() const override;
 	Qt::ItemFlags flags(const QModelIndex& index) const override;
 
+public Q_SLOTS:
+	void setOldTaskHandling(int mode);
+
 protected Q_SLOTS:
 	void highlightStage(size_t id);
 };
 
-class AutoAdjustingTreeView : public QTreeView
-{
-	Q_OBJECT
-	Q_PROPERTY(int stretchSection READ stretchSection WRITE setStretchSection)
-
-	mutable std::vector<int> size_hints_;  // size hints for sections
-	QList<int> auto_hide_cols_;  // auto-hiding sections
-	int stretch_section_ = -1;
-
-public:
-	AutoAdjustingTreeView(QWidget* parent = nullptr);
-
-	int stretchSection() const { return stretch_section_; }
-	void setStretchSection(int section);
-
-	void setAutoHideSections(const QList<int>& sections);
-
-	void setModel(QAbstractItemModel* model) override;
-	QSize viewportSizeHint() const override;
-	void resizeEvent(QResizeEvent* event) override;
-};
-
-class TaskListView : public AutoAdjustingTreeView
+class TaskListView : public QTreeView
 {
 	Q_OBJECT
 public:
 	TaskListView(QWidget* parent = nullptr);
 
 	void dropEvent(QDropEvent* event) override;
+
+	void setModel(QAbstractItemModel* model) override;
+	void dataChanged(const QModelIndex& topLeft, const QModelIndex& bottomRight,
+	                 const QVector<int>& roles = QVector<int>()) override;
+
+protected:
+	void updateColumnWidth();
 };
-}
+
+class SolutionListView : public QTreeView
+{
+	Q_OBJECT
+public:
+	SolutionListView(QWidget* parent = nullptr);
+
+	void setModel(QAbstractItemModel* model) override;
+	void dataChanged(const QModelIndex& topLeft, const QModelIndex& bottomRight,
+	                 const QVector<int>& roles = QVector<int>()) override;
+	void resizeEvent(QResizeEvent* event) override;
+
+protected:
+	void updateColumnWidth();
+};
+}  // namespace moveit_rviz_plugin

@@ -47,8 +47,9 @@ class QIcon;
 namespace rviz {
 class WindowManagerInterface;
 class Property;
+class BoolProperty;
 class EnumProperty;
-}
+}  // namespace rviz
 
 namespace moveit_rviz_plugin {
 
@@ -79,8 +80,8 @@ class TaskPanel : public rviz::Panel
 	TaskPanelPrivate* d_ptr;
 
 public:
-	TaskPanel(QWidget* parent = 0);
-	~TaskPanel();
+	TaskPanel(QWidget* parent = nullptr);
+	~TaskPanel() override;
 
 	/// add a new sub panel widget
 	void addSubPanel(SubPanel* w, const QString& title, const QIcon& icon);
@@ -90,8 +91,8 @@ public:
 	 * If not yet done, an instance is created. If use count drops to zero,
 	 * the global instance is destroyed.
 	 */
-	static void incDisplayCount(rviz::WindowManagerInterface* window_manager);
-	static void decDisplayCount();
+	static void request(rviz::WindowManagerInterface* window_manager);
+	static void release();
 
 	void onInitialize() override;
 	void load(const rviz::Config& config) override;
@@ -107,7 +108,7 @@ class MetaTaskListModel;
  *  Subscribing to task_monitoring and task_solution topics, it collects information
  *  about running tasks and their solutions and allows to inspect both,
  *  successful solutions and failed solution attempts.
-*/
+ */
 class TaskViewPrivate;
 class TaskView : public SubPanel
 {
@@ -123,11 +124,21 @@ protected:
 		EXPAND_ALL,
 		EXPAND_NONE
 	};
+
 	rviz::EnumProperty* initial_task_expand;
+	rviz::EnumProperty* old_task_handling;
+	rviz::BoolProperty* show_time_column;
 
 public:
+	enum OldTaskHandling
+	{
+		OLD_TASK_KEEP = 1,
+		OLD_TASK_REPLACE,
+		OLD_TASK_REMOVE
+	};
+
 	TaskView(TaskPanel* parent, rviz::Property* root);
-	~TaskView();
+	~TaskView() override;
 
 	void save(rviz::Config config) override;
 	void load(const rviz::Config& config) override;
@@ -141,6 +152,14 @@ protected Q_SLOTS:
 	void onCurrentSolutionChanged(const QModelIndex& current, const QModelIndex& previous);
 	void onSolutionSelectionChanged(const QItemSelection& selected, const QItemSelection& deselected);
 	void onExecCurrentSolution() const;
+	void onShowTimeChanged();
+	void onOldTaskHandlingChanged();
+
+private:
+	Q_PRIVATE_SLOT(d_ptr, void _q_configureInsertedModels(QModelIndex, int, int));
+
+Q_SIGNALS:
+	void oldTaskHandlingChanged(int);
 };
 
 class GlobalSettingsWidgetPrivate;
@@ -152,9 +171,9 @@ class GlobalSettingsWidget : public SubPanel
 
 public:
 	GlobalSettingsWidget(TaskPanel* parent, rviz::Property* root);
-	~GlobalSettingsWidget();
+	~GlobalSettingsWidget() override;
 
 	void save(rviz::Config config) override;
 	void load(const rviz::Config& config) override;
 };
-}
+}  // namespace moveit_rviz_plugin

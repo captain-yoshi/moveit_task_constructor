@@ -2,6 +2,7 @@
  * Software License Agreement (BSD License)
  *
  *  Copyright (c) 2017, Bielefeld University
+ *  Copyright (c) 2020, Hamburg University
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -37,11 +38,11 @@
 #include "task_list_model.h"
 #include "local_task_model.h"
 #include "remote_task_model.h"
+#include "task_panel.h"
 #include "factory_model.h"
 #include "icons.h"
 
 #include <ros/console.h>
-#include <ros/service_client.h>
 
 #include <QMimeData>
 #include <QHeaderView>
@@ -60,7 +61,7 @@ QVariant TaskListModel::horizontalHeader(int column, int role) {
 		case Qt::DisplayRole:
 			switch (column) {
 				case 0:
-					return tr("Name");
+					return tr("name");
 				case 1:
 					return tr(u8"✓");
 				case 2:
@@ -80,7 +81,7 @@ QVariant TaskListModel::horizontalHeader(int column, int role) {
 			break;
 
 		case Qt::TextAlignmentRole:
-			return column == 0 ? Qt::AlignLeft : Qt::AlignRight;
+			return Qt::AlignLeft;
 
 		case Qt::ToolTipRole:
 			switch (column) {
@@ -111,13 +112,6 @@ QVariant BaseTaskModel::data(const QModelIndex& index, int role) const {
 			return index.column() == 0 ? Qt::AlignLeft : Qt::AlignRight;
 	}
 	return QVariant();
-}
-
-Qt::ItemFlags BaseTaskModel::flags(const QModelIndex& index) const {
-	Qt::ItemFlags flags = QAbstractItemModel::flags(index);
-	if (index.column() == 0)
-		flags |= Qt::ItemIsEditable;  // name is editable
-	return flags;
 }
 
 QVariant BaseTaskModel::flowIcon(moveit::task_constructor::InterfaceFlags f) {
@@ -168,7 +162,8 @@ void TaskListModel::onRemoveModel(QAbstractItemModel* model) {
 		it->second = nullptr;
 }
 
-TaskListModel::TaskListModel(QObject* parent) : FlatMergeProxyModel(parent) {
+TaskListModel::TaskListModel(QObject* parent)
+  : FlatMergeProxyModel(parent), old_task_handling_(TaskView::OLD_TASK_REPLACE) {
 	ROS_DEBUG_NAMED(LOGNAME, "created TaskListModel: %p", this);
 	setStageFactory(getStageFactory());
 }
@@ -190,10 +185,6 @@ void TaskListModel::setDisplayContext(rviz::DisplayContext* display_context) {
 	display_context_ = display_context;
 }
 
-void TaskListModel::setSolutionClient(ros::ServiceClient* client) {
-	get_solution_client_ = client;
-}
-
 void TaskListModel::setStageFactory(const StageFactoryPtr& factory) {
 	stage_factory_ = factory;
 	if (stage_factory_)
@@ -210,6 +201,10 @@ Qt::ItemFlags TaskListModel::flags(const QModelIndex& index) const {
 			f |= Qt::ItemIsDropEnabled;
 	}
 	return f;
+}
+
+void TaskListModel::setOldTaskHandling(int mode) {
+	old_task_handling_ = mode;
 }
 
 void TaskListModel::highlightStage(size_t id) {
@@ -246,51 +241,49 @@ QVariant TaskListModel::data(const QModelIndex& index, int role) const {
 
 // process a task description message:
 // update existing RemoteTask, create a new one, or (if msg.stages is empty) delete an existing one
-void TaskListModel::processTaskDescriptionMessage(const std::string& id,
-                                                  const moveit_task_constructor_msgs::TaskDescription& msg) {
-	// retrieve existing or insert new remote task for given id
-	auto it_inserted = remote_tasks_.insert(std::make_pair(id, nullptr));
-	bool created = it_inserted.second;
-	RemoteTaskModel*& remote_task = it_inserted.first->second;
+void TaskListModel::processTaskDescriptionMessage(const moveit_task_constructor_msgs::TaskDescription& msg,
+                                                  ros::NodeHandle& nh, const std::string& service_name) {
+	// retrieve existing or insert new remote task for given task id
+	auto it_inserted = remote_tasks_.insert(std::make_pair(msg.task_id, nullptr));
+	const auto& task_it = it_inserted.first;
+	RemoteTaskModel*& remote_task = task_it->second;
 
 	if (!msg.stages.empty() && remote_task && (remote_task->taskFlags() & BaseTaskModel::IS_DESTROYED)) {
-		removeModel(remote_task);
-		created = true;  // re-create remote task after it was destroyed beforehand
+		// task overriding previous one that was already marked destroyed, but not yet removed from model
+		if (old_task_handling_ != TaskView::OLD_TASK_KEEP)
+			removeModel(remote_task);
+		remote_task = nullptr;  // resetting to nullptr will trigger creation of a new task
 	}
 
-	// empty list indicates, that this remote task is not available anymore
+	// empty list indicates, that this remote task was destroyed and we won't get updates for it
 	if (msg.stages.empty()) {
-		if (!remote_task) {  // task was already deleted locally
-			// we can now remove it from remote_tasks_
-			remote_tasks_.erase(it_inserted.first);
+		// always remove destroyed RemoteTask?
+		if (old_task_handling_ == TaskView::OLD_TASK_REMOVE && remote_task) {
+			removeModel(remote_task);
+			remote_tasks_.erase(task_it);
 			return;
 		}
-	} else if (created) {  // create new task model, if ID was not known before
+		if (remote_task)  // keep the task, but mark it as destroyed
+			remote_task->processStageDescriptions(msg.stages);
+	} else if (!remote_task) {  // create new task model, if ID was not known before
 		// the model is managed by this instance via Qt's parent-child mechanism
-		remote_task = new RemoteTaskModel(scene_, display_context_, this);
-		remote_task->setSolutionClient(get_solution_client_);
+		remote_task = new RemoteTaskModel(nh, service_name, scene_, display_context_, this);
+		remote_task->processStageDescriptions(msg.stages);
+		ROS_DEBUG_NAMED(LOGNAME, "received new task: %s (%s)", msg.stages[0].name.c_str(), msg.task_id.c_str());
+		// insert newly created model into this' model instance
+		insertModel(remote_task, -1);
 
 		// HACK: always use the last created model as active
 		active_task_model_ = remote_task;
-	}
-	if (!remote_task)
-		return;  // task is not in use anymore
-
-	remote_task->processStageDescriptions(msg.stages);
-
-	// insert newly created model into this' model instance
-	if (created) {
-		ROS_DEBUG_NAMED(LOGNAME, "received new task: %s", msg.id.c_str());
-		insertModel(remote_task, -1);
-	}
+	} else  // normal update
+		remote_task->processStageDescriptions(msg.stages);
 }
 
 // process a task statistics message
-void TaskListModel::processTaskStatisticsMessage(const std::string& id,
-                                                 const moveit_task_constructor_msgs::TaskStatistics& msg) {
-	auto it = remote_tasks_.find(id);
+void TaskListModel::processTaskStatisticsMessage(const moveit_task_constructor_msgs::TaskStatistics& msg) {
+	auto it = remote_tasks_.find(msg.task_id);
 	if (it == remote_tasks_.cend()) {
-		ROS_WARN("unknown task: %s", id.c_str());
+		ROS_WARN("unknown task: %s", msg.task_id.c_str());
 		return;
 	}
 
@@ -301,9 +294,8 @@ void TaskListModel::processTaskStatisticsMessage(const std::string& id,
 	remote_task->processStageStatistics(msg.stages);
 }
 
-DisplaySolutionPtr TaskListModel::processSolutionMessage(const std::string& id,
-                                                         const moveit_task_constructor_msgs::Solution& msg) {
-	auto it = remote_tasks_.find(id);
+DisplaySolutionPtr TaskListModel::processSolutionMessage(const moveit_task_constructor_msgs::Solution& msg) {
+	auto it = remote_tasks_.find(msg.task_id);
 	if (it == remote_tasks_.cend())
 		return DisplaySolutionPtr();  // unkown task
 
@@ -358,99 +350,7 @@ Qt::DropActions TaskListModel::supportedDropActions() const {
 	return Qt::CopyAction | Qt::MoveAction;
 }
 
-AutoAdjustingTreeView::AutoAdjustingTreeView(QWidget* parent) : QTreeView(parent) {
-// consider viewportSizeHint()
-#if QT_VERSION >= QT_VERSION_CHECK(5, 2, 0)
-	setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
-#endif
-}
-
-void AutoAdjustingTreeView::setStretchSection(int section) {
-	stretch_section_ = section;
-	updateGeometry();
-}
-
-void AutoAdjustingTreeView::setAutoHideSections(const QList<int>& sections) {
-	auto_hide_cols_ = sections;
-	updateGeometry();
-}
-
-void AutoAdjustingTreeView::setModel(QAbstractItemModel* model) {
-	size_hints_.clear();
-	QTreeView::setModel(model);
-
-	updateGeometry();
-}
-
-QSize AutoAdjustingTreeView::viewportSizeHint() const {
-	bool preferred = sizePolicy().horizontalPolicy() & QSizePolicy::ShrinkFlag;
-	auto m = model();
-	auto* h = header();
-	size_hints_.clear();
-
-	int width = 0;
-	for (int i = 0, end = m ? m->columnCount() : 0; i < end; ++i) {
-		size_hints_.push_back(h->sectionSizeHint(i));
-		if (preferred || !auto_hide_cols_.contains(i))
-			width += size_hints_.back();
-	}
-
-	QSize main_size(width, sizeHintForRow(0) * ((!preferred || !m) ? 2 : m->rowCount()));
-
-	// add size for header
-	QSize header_size(0, header()->isVisible() ? header()->height() : 0);
-
-	// add size for scrollbars
-	QSize scrollbars(verticalScrollBar()->isVisible() ? verticalScrollBar()->width() : 0,
-	                 horizontalScrollBar()->isVisible() ? horizontalScrollBar()->height() : 0);
-
-	return main_size + header_size + scrollbars;
-}
-
-void AutoAdjustingTreeView::resizeEvent(QResizeEvent* event) {
-	auto* m = model();
-	int columns = m ? m->columnCount() : 0;
-	if ((int)size_hints_.size() != columns)
-		viewportSizeHint();
-
-	// auto hide/show columns > 0, stretch last column to width
-	int available_width = event->size().width();
-
-	int required_width = std::accumulate(size_hints_.begin(), size_hints_.end(), 0);
-	std::vector<int> width = size_hints_;
-
-	// if required is larger than available width, try to hide some columns
-	QListIterator<int> it(auto_hide_cols_);
-	for (it.toBack(); it.hasPrevious() && required_width > available_width;) {
-		int section = it.previous();
-		required_width -= size_hints_[section];
-		width[section] = 0;
-	}
-
-	// extend width to current column width if possible
-	for (int i = 0; i < columns; ++i) {
-		if (i == stretch_section_)
-			continue;  // ignore auto-stretch section for now
-		int delta = columnWidth(i) > 0 ? columnWidth(i) - width[i] : 0;
-		if (delta < 0 || required_width + delta <= available_width) {
-			width[i] += delta;
-			required_width += delta;
-		}
-	}
-
-	// stretch section if there is still space available
-	if (stretch_section_ >= 0 && stretch_section_ < (int)width.size() && width[stretch_section_] > 0 &&
-	    available_width > required_width)
-		width[stretch_section_] += available_width - required_width;
-
-	// apply stuff
-	for (int i = 0; i < columns; ++i)
-		setColumnWidth(i, width[i]);
-}
-
-TaskListView::TaskListView(QWidget* parent) : AutoAdjustingTreeView(parent) {
-	setStretchSection(0);
-}
+TaskListView::TaskListView(QWidget* parent) : QTreeView(parent) {}
 
 // dropping onto an item, should expand this item
 void TaskListView::dropEvent(QDropEvent* event) {
@@ -459,6 +359,65 @@ void TaskListView::dropEvent(QDropEvent* event) {
 	if (event->isAccepted())
 		expand(index);
 }
+
+void TaskListView::setModel(QAbstractItemModel* model) {
+	QTreeView::setModel(model);
+	if (header()->count() >= 4) {
+		header()->setSectionResizeMode(0, QHeaderView::Stretch);
+		updateColumnWidth();
+	}
 }
+
+void TaskListView::dataChanged(const QModelIndex& topLeft, const QModelIndex& bottomRight, const QVector<int>& roles) {
+	if (bottomRight.column() > 0) {
+		updateColumnWidth();
+	}
+	QTreeView::dataChanged(topLeft, bottomRight, roles);
+}
+
+void TaskListView::updateColumnWidth() {
+	for (int i = 3; i > 0; --i) {
+		header()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
+	}
+}
+
+SolutionListView::SolutionListView(QWidget* parent) : QTreeView(parent) {}
+
+void SolutionListView::setModel(QAbstractItemModel* model) {
+	QTreeView::setModel(model);
+	updateColumnWidth();
+}
+
+void SolutionListView::dataChanged(const QModelIndex& topLeft, const QModelIndex& bottomRight,
+                                   const QVector<int>& roles) {
+	if (bottomRight.column() > 0) {
+		updateColumnWidth();
+	}
+	QTreeView::dataChanged(topLeft, bottomRight, roles);
+}
+
+void SolutionListView::resizeEvent(QResizeEvent* e) {
+	QTreeView::resizeEvent(e);
+	updateColumnWidth();
+}
+
+void SolutionListView::updateColumnWidth() {
+	// do nothing if current model is not what we expect
+	if (header()->count() < 3) {
+		return;
+	}
+
+	for (int i = 0; i < 2; ++i) {
+		header()->setSectionResizeMode(i, QHeaderView::ResizeToContents);
+	}
+
+	const int stretch_size = viewport()->size().width() - header()->sectionPosition(2);
+
+	const int content_size = sizeHintForColumn(2);
+
+	header()->resizeSection(2, std::max(stretch_size, content_size));
+}
+
+}  // namespace moveit_rviz_plugin
 
 #include "moc_task_list_model.cpp"

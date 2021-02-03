@@ -36,6 +36,7 @@
 
 #include <moveit/task_constructor/stages/generate_pose.h>
 #include <moveit/task_constructor/storage.h>
+#include <moveit/task_constructor/cost_terms.h>
 #include <moveit/task_constructor/marker_tools.h>
 #include <moveit/planning_scene/planning_scene.h>
 #include <rviz_marker_tools/marker_creation.h>
@@ -45,6 +46,8 @@ namespace task_constructor {
 namespace stages {
 
 GeneratePose::GeneratePose(const std::string& name) : MonitoringGenerator(name) {
+	setCostTerm(std::make_unique<cost::Constant>(0.0));
+
 	auto& p = properties();
 	p.declare<geometry_msgs::PoseStamped>("pose", "target pose to pass on in spawned states");
 }
@@ -60,7 +63,7 @@ void GeneratePose::onNewSolution(const SolutionBase& s) {
 }
 
 bool GeneratePose::canCompute() const {
-	return upstream_solutions_.size() > 0;
+	return !upstream_solutions_.empty();
 }
 
 void GeneratePose::compute() {
@@ -86,6 +89,6 @@ void GeneratePose::compute() {
 
 	spawn(std::move(state), std::move(trajectory));
 }
-}
-}
-}
+}  // namespace stages
+}  // namespace task_constructor
+}  // namespace moveit

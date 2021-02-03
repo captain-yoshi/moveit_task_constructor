@@ -38,12 +38,9 @@
 
 #include "task_list_model.h"
 #include <moveit/visualization_tools/display_solution.h>
+#include <ros/service_client.h>
 #include <memory>
 #include <limits>
-
-namespace ros {
-class ServiceClient;
-}
 
 namespace moveit_rviz_plugin {
 
@@ -57,7 +54,7 @@ class RemoteTaskModel : public BaseTaskModel
 	Q_OBJECT
 	struct Node;
 	Node* const root_;
-	ros::ServiceClient* get_solution_client_ = nullptr;
+	ros::ServiceClient get_solution_client_;
 
 	std::map<uint32_t, Node*> id_to_stage_;
 	std::map<uint32_t, DisplaySolutionPtr> id_to_solution_;
@@ -70,18 +67,16 @@ class RemoteTaskModel : public BaseTaskModel
 	void setSolutionData(const moveit_task_constructor_msgs::SolutionInfo& info);
 
 public:
-	RemoteTaskModel(const planning_scene::PlanningSceneConstPtr& scene, rviz::DisplayContext* display_context,
+	RemoteTaskModel(ros::NodeHandle& nh, const std::string& service_name,
+	                const planning_scene::PlanningSceneConstPtr& scene, rviz::DisplayContext* display_context,
 	                QObject* parent = nullptr);
-	~RemoteTaskModel();
-
-	void setSolutionClient(ros::ServiceClient* client);
+	~RemoteTaskModel() override;
 
 	int rowCount(const QModelIndex& parent = QModelIndex()) const override;
 
 	QModelIndex index(int row, int column, const QModelIndex& parent = QModelIndex()) const override;
 	QModelIndex parent(const QModelIndex& index) const override;
 
-	Qt::ItemFlags flags(const QModelIndex& index) const override;
 	QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
 	bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
 
@@ -114,7 +109,7 @@ class RemoteSolutionModel : public QAbstractTableModel
 		inline bool operator<(const Data& other) const { return this->id < other.id; }
 	};
 	// successful and failed solutions ordered by id / creation
-	typedef std::list<Data> DataList;
+	using DataList = std::list<Data>;
 	DataList data_;
 	size_t num_failed_data_ = 0;  // number of failed solutions in data_
 	size_t num_failed_ = 0;  // number of reported failures
@@ -147,4 +142,4 @@ public:
 	void processSolutionIDs(const std::vector<uint32_t>& successful, const std::vector<uint32_t>& failed,
 	                        size_t num_failed, double total_compute_time);
 };
-}
+}  // namespace moveit_rviz_plugin

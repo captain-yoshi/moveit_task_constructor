@@ -54,7 +54,7 @@ namespace moveit {
 namespace core {
 MOVEIT_CLASS_FORWARD(RobotModel)
 }
-}
+}  // namespace moveit
 
 namespace planning_scene {
 MOVEIT_CLASS_FORWARD(PlanningScene)
@@ -84,7 +84,7 @@ enum InterfaceFlag
 	GENERATE = WRITES_PREV_END | WRITES_NEXT_START,
 };
 
-typedef Flags<InterfaceFlag> InterfaceFlags;
+using InterfaceFlags = Flags<InterfaceFlag>;
 
 /** invert interface such that
  * - new end can connect to old start
@@ -93,13 +93,13 @@ typedef Flags<InterfaceFlag> InterfaceFlags;
 constexpr InterfaceFlags invert(InterfaceFlags f) {
 	InterfaceFlags inv;
 	if (f & READS_START)
-		inv |= WRITES_NEXT_START;
+		inv = inv | WRITES_NEXT_START;
 	if (f & WRITES_PREV_END)
-		inv |= READS_END;
+		inv = inv | READS_END;
 	if (f & READS_END)
-		inv |= WRITES_PREV_END;
+		inv = inv | WRITES_PREV_END;
 	if (f & WRITES_NEXT_START)
-		inv |= READS_START;
+		inv = inv | READS_START;
 	return inv;
 };
 
@@ -111,7 +111,7 @@ constexpr InterfaceFlags END_IF_MASK({ READS_END, WRITES_NEXT_START });
 MOVEIT_CLASS_FORWARD(Interface)
 MOVEIT_CLASS_FORWARD(Stage)
 class InterfaceState;
-typedef std::pair<const InterfaceState&, const InterfaceState&> InterfaceStatePair;
+using InterfaceStatePair = std::pair<const InterfaceState&, const InterfaceState&>;
 
 /// exception thrown by Stage::init()
 /// It collects individual errors in stages throughout the pipeline to allow overall error reporting
@@ -131,20 +131,22 @@ public:
 	/// check of existing errors
 	operator bool() const { return !errors_.empty(); }
 
-	virtual const char* what() const noexcept override;
+	const char* what() const noexcept override;
 
 private:
 	std::list<std::pair<const Stage*, const std::string>> errors_;
 };
 std::ostream& operator<<(std::ostream& os, const InitStageException& e);
 
+MOVEIT_CLASS_FORWARD(CostTerm);
+class LambdaCostTerm;
 class ContainerBase;
 class StagePrivate;
 class Stage
 {
 public:
 	PRIVATE_CLASS(Stage)
-	typedef std::unique_ptr<Stage> pointer;
+	using pointer = std::unique_ptr<Stage>;
 	/** Names for property initialization sources
 	 *
 	 * - INTERFACE allows to pass properties from one stage to the next (in a SerialContainer).
@@ -159,6 +161,7 @@ public:
 		PARENT = 2,
 		INTERFACE = 4,
 	};
+
 	virtual ~Stage();
 
 	/// auto-convert Stage to StagePrivate* when needed
@@ -179,6 +182,8 @@ public:
 
 	const std::string& name() const;
 	void setName(const std::string& name);
+
+	uint32_t introspectionId() const;
 
 	/** set computation timeout (in seconds)
 	 *
@@ -203,30 +208,41 @@ public:
 	}
 	void setForwardedProperties(const std::set<std::string>& names) { setProperty("forwarded_properties", names); }
 
-	typedef std::function<void(const SolutionBase& s)> SolutionCallback;
-	typedef std::list<SolutionCallback> SolutionCallbackList;
+	using SolutionCallback = std::function<void(const SolutionBase&)>;
+	using SolutionCallbackList = std::list<SolutionCallback>;
 	/// add function to be called for every newly found solution or failure
 	SolutionCallbackList::const_iterator addSolutionCallback(SolutionCallback&& cb);
 	/// remove function callback
 	void removeSolutionCallback(SolutionCallbackList::const_iterator which);
 
+	/** set method to determine costs for solutions of this stage */
+
+	void setCostTerm(const CostTermConstPtr& term);
+	// overload to accept appropriate lambda expressions
+	template <typename T, typename = std::enable_if_t<std::is_constructible<LambdaCostTerm, T>::value>>
+	void setCostTerm(T term) {
+		setCostTerm(std::make_shared<LambdaCostTerm>(term));
+	}
+
 	const ordered<SolutionBaseConstPtr>& solutions() const;
 	const std::list<SolutionBaseConstPtr>& failures() const;
 	size_t numFailures() const;
-	/// call to increase number of failures w/o storing a (failure) trajectory
+	/// Call to increase number of failures w/o storing a (failure) trajectory
 	void silentFailure();
-	/// should we generate failure solutions?
+	/// Should we generate failure solutions? Note: Always report a failure!
 	bool storeFailures() const;
 
-	/// get the stage's property map
+	/// Get the stage's property map
 	PropertyMap& properties();
 	const PropertyMap& properties() const { return const_cast<Stage*>(this)->properties(); }
-	/// set a previously declared property to a new value
+	/// Set a previously declared property to a new value
 	void setProperty(const std::string& name, const boost::any& value);
 	/// overload: const char* values are stored as std::string
 	inline void setProperty(const std::string& name, const char* value) { setProperty(name, std::string(value)); }
-	/// analyze source of error and report accordingly
+
+	/// Analyze source of error and report accordingly
 	[[noreturn]] void reportPropertyError(const Property::error& e);
+
 	double getTotalComputeTime() const;
 
 protected:
@@ -357,9 +373,6 @@ protected:
 class ConnectingPrivate;
 class Connecting : public ComputeBase
 {
-protected:
-	virtual bool compatible(const InterfaceState& from_state, const InterfaceState& to_state) const;
-
 public:
 	PRIVATE_CLASS(Connecting)
 	Connecting(const std::string& name = "connecting");
@@ -369,8 +382,10 @@ public:
 	virtual void compute(const InterfaceState& from, const InterfaceState& to) = 0;
 
 protected:
+	virtual bool compatible(const InterfaceState& from_state, const InterfaceState& to_state) const;
+
 	/// register solution as a solution connecting states from -> to
-	void connect(const InterfaceState& from, const InterfaceState& to, SolutionBasePtr solution);
+	void connect(const InterfaceState& from, const InterfaceState& to, const SolutionBasePtr& solution);
 
 	/// convienency methods consuming a SubTrajectory
 	void connect(const InterfaceState& from, const InterfaceState& to, SubTrajectory&& trajectory) {
@@ -385,5 +400,5 @@ protected:
 /** Return (horizontal) flow symbol for start or end interface (specified by mask) */
 template <unsigned int mask>
 const char* flowSymbol(InterfaceFlags f);
-}
-}
+}  // namespace task_constructor
+}  // namespace moveit

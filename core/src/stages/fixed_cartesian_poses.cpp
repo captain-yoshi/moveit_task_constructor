@@ -36,7 +36,9 @@
 
 #include <moveit/task_constructor/stages/fixed_cartesian_poses.h>
 #include <moveit/task_constructor/storage.h>
+#include <moveit/task_constructor/cost_terms.h>
 #include <moveit/task_constructor/marker_tools.h>
+
 #include <moveit/planning_scene/planning_scene.h>
 #include <rviz_marker_tools/marker_creation.h>
 
@@ -44,9 +46,11 @@ namespace moveit {
 namespace task_constructor {
 namespace stages {
 
-typedef std::vector<geometry_msgs::PoseStamped> PosesList;
+using PosesList = std::vector<geometry_msgs::PoseStamped>;
 
 FixedCartesianPoses::FixedCartesianPoses(const std::string& name) : MonitoringGenerator(name) {
+	setCostTerm(std::make_unique<cost::Constant>(0.0));
+
 	auto& p = properties();
 	p.declare<PosesList>("poses", PosesList(), "target poses to spawn");
 }
@@ -70,7 +74,7 @@ void FixedCartesianPoses::onNewSolution(const SolutionBase& s) {
 }
 
 bool FixedCartesianPoses::canCompute() const {
-	return upstream_solutions_.size() > 0;
+	return !upstream_solutions_.empty();
 }
 
 void FixedCartesianPoses::compute() {
@@ -97,6 +101,6 @@ void FixedCartesianPoses::compute() {
 		spawn(std::move(state), std::move(trajectory));
 	}
 }
-}
-}
-}
+}  // namespace stages
+}  // namespace task_constructor
+}  // namespace moveit

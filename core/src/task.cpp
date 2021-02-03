@@ -71,8 +71,8 @@ std::string rosNormalizeName(const std::string& name) {
 namespace moveit {
 namespace task_constructor {
 
-TaskPrivate::TaskPrivate(Task* me, const std::string& id)
-  : WrapperBasePrivate(me, std::string()), id_(rosNormalizeName(id)), preempt_requested_(false) {}
+TaskPrivate::TaskPrivate(Task* me, const std::string& ns)
+  : WrapperBasePrivate(me, std::string()), ns_(rosNormalizeName(ns)), preempt_requested_(false) {}
 
 void swap(StagePrivate*& lhs, StagePrivate*& rhs) {
 	// It only makes sense to swap pimpl instances of a Task!
@@ -104,23 +104,23 @@ const ContainerBase* TaskPrivate::stages() const {
 	return children().empty() ? nullptr : static_cast<ContainerBase*>(children().front().get());
 }
 
-Task::Task(const std::string& id, ContainerBase::pointer&& container)
-  : WrapperBase(new TaskPrivate(this, id), std::move(container)) {
-	if (!id.empty())
-		stages()->setName(id);
+Task::Task(const std::string& ns, bool introspection, ContainerBase::pointer&& container)
+  : WrapperBase(new TaskPrivate(this, ns), std::move(container)) {
+	setTimeout(std::numeric_limits<double>::max());
 
 	// monitor state on commandline
 	// addTaskCallback(std::bind(&Task::printState, this, std::ref(std::cout)));
 	// enable introspection by default, but only if ros::init() was called
-	if (ros::isInitialized())
+	if (ros::isInitialized() && introspection)
 		enableIntrospection(true);
 }
 
-Task::Task(Task&& other) : WrapperBase(new TaskPrivate(this, std::string()), std::make_unique<SerialContainer>()) {
+Task::Task(Task&& other)  // NOLINT(performance-noexcept-move-constructor)
+  : WrapperBase(new TaskPrivate(this, std::string()), std::make_unique<SerialContainer>()) {
 	*this = std::move(other);
 }
 
-Task& Task::operator=(Task&& other) {
+Task& Task::operator=(Task&& other) {  // NOLINT(performance-noexcept-move-constructor)
 	clear();  // remove all stages of current task
 	swap(this->pimpl_, other.pimpl_);
 	return *this;
@@ -128,12 +128,12 @@ Task& Task::operator=(Task&& other) {
 
 struct PlannerCache
 {
-	typedef std::tuple<std::string, std::string, std::string> PlannerID;
-	typedef std::map<PlannerID, std::weak_ptr<planning_pipeline::PlanningPipeline>> PlannerMap;
-	typedef std::list<std::pair<std::weak_ptr<const robot_model::RobotModel>, PlannerMap>> ModelList;
+	using PlannerID = std::tuple<std::string, std::string, std::string>;
+	using PlannerMap = std::map<PlannerID, std::weak_ptr<planning_pipeline::PlanningPipeline> >;
+	using ModelList = std::list<std::pair<std::weak_ptr<const robot_model::RobotModel>, PlannerMap> >;
 	ModelList cache_;
 
-	PlannerMap::mapped_type& retrieve(const robot_model::RobotModelConstPtr& model, PlannerID id) {
+	PlannerMap::mapped_type& retrieve(const robot_model::RobotModelConstPtr& model, const PlannerID& id) {
 		// find model in cache_ and remove expired entries while doing so
 		ModelList::iterator model_it = cache_.begin();
 		while (model_it != cache_.end()) {
@@ -173,6 +173,7 @@ planning_pipeline::PlanningPipelinePtr Task::createPlanner(const robot_model::Ro
 
 Task::~Task() {
 	auto impl = pimpl();
+	impl->introspection_.reset();  // stop introspection
 	clear();  // remove all stages
 	impl->robot_model_.reset();
 	// only destroy loader after all references to the model are gone!
@@ -180,8 +181,13 @@ Task::~Task() {
 }
 
 void Task::setRobotModel(const core::RobotModelConstPtr& robot_model) {
+	if (!robot_model) {
+		ROS_ERROR_STREAM(name() << ": received invalid robot model");
+		return;
+	}
 	auto impl = pimpl();
-	reset();  // solutions, scenes, etc become invalid
+	if (impl->robot_model_ && impl->robot_model_ != robot_model)
+		reset();  // solutions, scenes, etc become invalid
 	impl->robot_model_ = robot_model;
 }
 
@@ -212,9 +218,9 @@ void Task::enableIntrospection(bool enable) {
 		impl->introspection_.reset(new Introspection(impl));
 	else if (!enable && impl->introspection_) {
 		// reset introspection instance of all stages
-		pimpl()->setIntrospection(nullptr);
-		pimpl()->traverseStages(
-		    [](Stage& stage, int) {
+		impl->setIntrospection(nullptr);
+		impl->traverseStages(
+		    [](Stage& stage, int /*depth*/) {
 			    stage.pimpl()->setIntrospection(nullptr);
 			    return true;
 		    },
@@ -266,7 +272,7 @@ void Task::init() {
 	// provide introspection instance to all stages
 	impl->setIntrospection(impl->introspection_.get());
 	impl->traverseStages(
-	    [impl](Stage& stage, int) {
+	    [impl](Stage& stage, int /*depth*/) {
 		    stage.pimpl()->setIntrospection(impl->introspection_.get());
 		    return true;
 	    },
@@ -287,13 +293,14 @@ void Task::compute() {
 
 bool Task::plan(size_t max_solutions) {
 	auto impl = pimpl();
-	reset();
 	init();
 
 	impl->preempt_requested_ = false;
 	s_catch_signals();
-	while (ros::ok() && !impl->preempt_requested_ && canCompute() &&
-	       (max_solutions == 0 || numSolutions() < max_solutions)) {
+	const double available_time = timeout();
+	const auto start_time = std::chrono::steady_clock::now();
+	while (!impl->preempt_requested_ && canCompute() && (max_solutions == 0 || numSolutions() < max_solutions) &&
+	       std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time).count() < available_time) {
 		compute();
 		for (const auto& cb : impl->task_cbs_)
 			cb(*this);
@@ -320,6 +327,8 @@ moveit_msgs::MoveItErrorCodes Task::execute(const SolutionBase& s) {
 
 	moveit_task_constructor_msgs::ExecuteTaskSolutionGoal goal;
 	s.fillMessage(goal.solution, pimpl()->introspection_.get());
+	s.start()->scene()->getPlanningSceneMsg(goal.solution.start_scene);
+
 	ac.sendGoal(goal);
 	ac.waitForResult();
 	return ac.getResult()->error_code;
@@ -353,10 +362,6 @@ PropertyMap& Task::properties() {
 void Task::setProperty(const std::string& name, const boost::any& value) {
 	// forward to wrapped() stage
 	wrapped()->setProperty(name, value);
-}
-
-const std::string& Task::id() const {
-	return pimpl()->id();
 }
 
 const core::RobotModelConstPtr& Task::getRobotModel() const {

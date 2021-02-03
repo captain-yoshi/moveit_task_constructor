@@ -60,7 +60,7 @@ findDuplicates(const std::vector<const moveit::core::JointModelGroup*>& groups,
 	}
 	return duplicates;
 }
-}
+}  // namespace
 
 namespace moveit {
 namespace task_constructor {
@@ -91,10 +91,8 @@ moveit::core::JointModelGroup* merge(const std::vector<const moveit::core::Joint
 	if (joints.size() != sum_joints) {  // overlapping joint groups: analyse in more detail
 		auto duplicates = findDuplicates(groups, joints);
 		if (!duplicates.empty()) {
-			std::string message(
-			    "overlapping joints: " +
-			    boost::algorithm::join(duplicates | boost::adaptors::transformed([](auto&& j) { return j->getName(); }),
-			                           ", "));
+			auto getJointName = boost::adaptors::transformed([](auto&& jm) { return jm->getName(); });
+			std::string message("overlapping joints: " + boost::algorithm::join(duplicates | getJointName, ", "));
 			throw std::runtime_error(message);
 		}
 	}
@@ -171,5 +169,5 @@ merge(const std::vector<robot_trajectory::RobotTrajectoryConstPtr>& sub_trajecto
 	timing.computeTimeStamps(*merged_traj, 1.0, 1.0);
 	return merged_traj;
 }
-}
-}
+}  // namespace task_constructor
+}  // namespace moveit

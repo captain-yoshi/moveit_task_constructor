@@ -3,26 +3,32 @@
 #include <moveit/task_constructor/task_p.h>
 #include <moveit/task_constructor/stages/fixed_state.h>
 #include <moveit/planning_scene/planning_scene.h>
-#include <moveit/utils/robot_model_test_utils.h>
 
+#include "models.h"
 #include "gtest_value_printers.h"
 #include <gtest/gtest.h>
 #include <initializer_list>
+#include <chrono>
+#include <thread>
 
 using namespace moveit::task_constructor;
 
-static unsigned int mock_id = 0;
+static unsigned int MOCK_ID = 0;
 
 class GeneratorMockup : public Generator
 {
+	moveit::core::RobotModelConstPtr robot;
 	int runs = 0;
 
 public:
-	GeneratorMockup(int runs = 0) : Generator("generator " + std::to_string(++mock_id)), runs(runs) {}
+	GeneratorMockup(int runs = 0) : Generator("generator " + std::to_string(++MOCK_ID)), runs(runs) {}
+	void init(const moveit::core::RobotModelConstPtr& robot_model) override { robot = robot_model; }
 	bool canCompute() const override { return runs > 0; }
 	void compute() override {
-		if (runs > 0)
+		if (runs > 0) {
 			--runs;
+			spawn(InterfaceState(std::make_shared<planning_scene::PlanningScene>(robot)), SubTrajectory());
+		}
 	}
 };
 
@@ -30,10 +36,12 @@ class MonitoringGeneratorMockup : public MonitoringGenerator
 {
 public:
 	MonitoringGeneratorMockup(Stage* monitored)
-	  : MonitoringGenerator("monitoring generator " + std::to_string(++mock_id), monitored) {}
+	  : MonitoringGenerator("monitoring generator " + std::to_string(++MOCK_ID), monitored) {}
 	bool canCompute() const override { return false; }
 	void compute() override {}
-	void onNewSolution(const SolutionBase&) override {}
+	void onNewSolution(const SolutionBase& s) override {
+		spawn(InterfaceState(s.end()->scene()->diff()), SubTrajectory());
+	}
 };
 
 class PropagatorMockup : public PropagatingEitherWay
@@ -43,14 +51,18 @@ class PropagatorMockup : public PropagatingEitherWay
 
 public:
 	PropagatorMockup(int fw = 0, int bw = 0)
-	  : PropagatingEitherWay("propagate " + std::to_string(++mock_id)), fw_runs(fw), bw_runs(bw) {}
-	void computeForward(const InterfaceState& /* from */) override {
-		if (fw_runs > 0)
+	  : PropagatingEitherWay("propagate " + std::to_string(++MOCK_ID)), fw_runs(fw), bw_runs(bw) {}
+	void computeForward(const InterfaceState& from) override {
+		if (fw_runs > 0) {
 			--fw_runs;
+			sendForward(from, InterfaceState(from.scene()->diff()), SubTrajectory());
+		}
 	}
-	void computeBackward(const InterfaceState& /* from */) override {
-		if (bw_runs > 0)
+	void computeBackward(const InterfaceState& to) override {
+		if (bw_runs > 0) {
 			--bw_runs;
+			sendBackward(InterfaceState(to.scene()->diff()), to, SubTrajectory());
+		}
 	}
 };
 class ForwardMockup : public PropagatorMockup
@@ -58,7 +70,7 @@ class ForwardMockup : public PropagatorMockup
 public:
 	ForwardMockup(int runs = 0) : PropagatorMockup(runs, 0) {
 		restrictDirection(FORWARD);
-		setName("forward " + std::to_string(mock_id));
+		setName("forward " + std::to_string(MOCK_ID));
 	}
 };
 class BackwardMockup : public PropagatorMockup
@@ -66,7 +78,20 @@ class BackwardMockup : public PropagatorMockup
 public:
 	BackwardMockup(int runs = 0) : PropagatorMockup(0, runs) {
 		restrictDirection(BACKWARD);
-		setName("backward " + std::to_string(mock_id));
+		setName("backward " + std::to_string(MOCK_ID));
+	}
+};
+
+// ForwardMockup that takes a while for its computation
+class TimedForwardMockup : public ForwardMockup
+{
+	std::chrono::milliseconds duration_;
+
+public:
+	TimedForwardMockup(std::chrono::milliseconds duration) : ForwardMockup(1000), duration_(duration) {}
+	void computeForward(const InterfaceState& from) override {
+		std::this_thread::sleep_for(duration_);
+		ForwardMockup::computeForward(from);
 	}
 };
 
@@ -75,10 +100,11 @@ class ConnectMockup : public Connecting
 	int runs = 0;
 
 public:
-	ConnectMockup(int runs = 0) : Connecting("connect " + std::to_string(++mock_id)), runs(runs) {}
-	void compute(const InterfaceState& /* from */, const InterfaceState& /* to */) override {
+	ConnectMockup(int runs = 0) : Connecting("connect " + std::to_string(++MOCK_ID)), runs(runs) {}
+	void compute(const InterfaceState& from, const InterfaceState& to) override {
 		if (runs > 0)
 			--runs;
+		connect(from, to, std::make_shared<SubTrajectory>());
 	}
 };
 
@@ -189,7 +215,7 @@ protected:
 	}
 	void initContainer(const std::initializer_list<StageType>& types = {}) {
 		container.clear();
-		mock_id = 0;
+		MOCK_ID = 0;
 		append(container, types);
 	}
 
@@ -643,11 +669,13 @@ TEST_F(ParallelTest, init_any) {
 }
 
 TEST(Task, move) {
+	MOCK_ID = 0;
 	Task t1("foo");
 	t1.add(std::make_unique<GeneratorMockup>());
 	t1.add(std::make_unique<GeneratorMockup>());
 	EXPECT_EQ(t1.stages()->numChildren(), 2u);
 
+	MOCK_ID = 0;
 	Task t2 = std::move(t1);
 	EXPECT_EQ(t2.stages()->numChildren(), 2u);
 	EXPECT_EQ(t1.stages()->numChildren(), 0u);
@@ -658,28 +686,25 @@ TEST(Task, move) {
 }
 
 TEST(Task, reuse) {
-	// create dummy robot model
-	moveit::core::RobotModelBuilder builder("robot", "base");
-	builder.addChain("base->a->b->c", "continuous");
-	builder.addGroupChain("base", "c", "group");
-	moveit::core::RobotModelConstPtr robot_model = builder.build();
+	moveit::core::RobotModelConstPtr robot_model = getModel();
 
 	Task t("first");
 	t.setRobotModel(robot_model);
 
 	auto configure = [](Task& t) {
+		MOCK_ID = 0;
 		auto ref = new stages::FixedState("fixed");
 		auto scene = std::make_shared<planning_scene::PlanningScene>(t.getRobotModel());
 		ref->setState(scene);
 
 		t.add(Stage::pointer(ref));
-		t.add(std::make_unique<ConnectMockup>());
+		t.add(std::make_unique<ConnectMockup>(2));
 		t.add(std::make_unique<MonitoringGeneratorMockup>(ref));
 	};
 
 	try {
 		configure(t);
-		t.plan(1);
+		EXPECT_TRUE(t.plan(1));
 
 		t = Task("second");
 		t.setRobotModel(robot_model);
@@ -688,8 +713,39 @@ TEST(Task, reuse) {
 		EXPECT_EQ(static_cast<void*>(t.stages()->pimpl()->parent()), static_cast<void*>(&t));
 
 		configure(t);
-		t.plan(1);
+		EXPECT_TRUE(t.plan(1));
 	} catch (const InitStageException& e) {
 		ADD_FAILURE() << "InitStageException:" << std::endl << e << t;
 	}
+}
+
+TEST(Task, timeout) {
+	MOCK_ID = 0;
+	Task t;
+	t.setRobotModel(getModel());
+
+	auto timeout = std::chrono::milliseconds(10);
+	t.add(std::make_unique<GeneratorMockup>(100));  // allow up to 100 solutions spawned
+	t.add(std::make_unique<TimedForwardMockup>(timeout));
+
+	// no timeout, but limited number of solutions
+	EXPECT_TRUE(t.plan(3));
+	EXPECT_EQ(t.solutions().size(), 3u);
+
+	// zero timeout fails
+	t.reset();
+	t.setTimeout(0.0);
+	EXPECT_FALSE(t.plan());
+
+	// time for 1 solution
+	t.reset();
+	t.setTimeout(std::chrono::duration<double>(timeout).count());
+	EXPECT_TRUE(t.plan());
+	EXPECT_EQ(t.solutions().size(), 1u);
+
+	// time for 2 solutions
+	t.reset();
+	t.setTimeout(std::chrono::duration<double>(2 * timeout).count());
+	EXPECT_TRUE(t.plan());
+	EXPECT_EQ(t.solutions().size(), 2u);
 }

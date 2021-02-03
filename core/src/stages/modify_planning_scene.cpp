@@ -38,18 +38,38 @@
 
 #include <moveit/task_constructor/stages/modify_planning_scene.h>
 #include <moveit/task_constructor/storage.h>
+#include <moveit/task_constructor/cost_terms.h>
+
 #include <moveit/planning_scene/planning_scene.h>
 
 namespace moveit {
 namespace task_constructor {
 namespace stages {
 
-ModifyPlanningScene::ModifyPlanningScene(const std::string& name) : PropagatingEitherWay(name) {}
+ModifyPlanningScene::ModifyPlanningScene(const std::string& name) : PropagatingEitherWay(name) {
+	setCostTerm(std::make_unique<cost::Constant>(0.0));
+}
 
 void ModifyPlanningScene::attachObjects(const Names& objects, const std::string& attach_link, bool attach) {
 	auto it_inserted = attach_objects_.insert(std::make_pair(attach_link, std::make_pair(Names(), attach)));
 	Names& o = it_inserted.first->second.first;
 	o.insert(o.end(), objects.begin(), objects.end());
+}
+
+void ModifyPlanningScene::addObject(const moveit_msgs::CollisionObject& collision_object) {
+	if (collision_object.operation != moveit_msgs::CollisionObject::ADD) {
+		ROS_ERROR_STREAM_NAMED("ModifyPlanningScene", name() << ": addObject is called with object's operation not set "
+		                                                        "to ADD -- ignoring the object");
+		return;
+	}
+	collision_objects_.push_back(collision_object);
+}
+
+void ModifyPlanningScene::removeObject(const std::string& object_name) {
+	moveit_msgs::CollisionObject obj;
+	obj.id = object_name;
+	obj.operation = moveit_msgs::CollisionObject::REMOVE;
+	collision_objects_.push_back(obj);
 }
 
 void ModifyPlanningScene::allowCollisions(const Names& first, const Names& second, bool allow) {
@@ -112,6 +132,9 @@ void ModifyPlanningScene::setCollisionObjects(planning_scene::PlanningScene& sce
 InterfaceState ModifyPlanningScene::apply(const InterfaceState& from, bool invert) {
 	planning_scene::PlanningScenePtr scene = from.scene()->diff();
 	InterfaceState result(scene);
+	// add/remove objects
+	for (const auto& collision_object : collision_objects_)
+		processCollisionObject(*scene, collision_object);
 
 	// attach/detach objects
 	for (const auto& pair : attach_objects_)
@@ -129,6 +152,11 @@ InterfaceState ModifyPlanningScene::apply(const InterfaceState& from, bool inver
 		callback_(scene, properties());
 
 	return result;
+}
+
+void ModifyPlanningScene::processCollisionObject(planning_scene::PlanningScene& scene,
+                                                 const moveit_msgs::CollisionObject& object) {
+	scene.processCollisionObjectMsg(object);
 }
 }  // namespace stages
 }  // namespace task_constructor

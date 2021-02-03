@@ -46,18 +46,24 @@
 namespace moveit {
 namespace task_constructor {
 
-const planning_scene::PlanningScenePtr& ensureUpdated(const planning_scene::PlanningScenePtr& scene) {
+planning_scene::PlanningSceneConstPtr ensureUpdated(const planning_scene::PlanningScenePtr& scene) {
 	// ensure scene's state is updated
 	if (scene->getCurrentState().dirty())
 		scene->getCurrentStateNonConst().update();
 	return scene;
 }
 
-InterfaceState::InterfaceState(const planning_scene::PlanningScenePtr& ps) : scene_(ensureUpdated(ps)) {}
+InterfaceState::InterfaceState(const planning_scene::PlanningScenePtr& ps) : InterfaceState(ensureUpdated(ps)) {}
 
-InterfaceState::InterfaceState(const planning_scene::PlanningSceneConstPtr& ps) : scene_(ps) {
+InterfaceState::InterfaceState(const planning_scene::PlanningSceneConstPtr& ps)
+  : scene_(ps), priority_(Priority(0, 0.0)) {
 	if (scene_->getCurrentState().dirty())
 		ROS_ERROR_NAMED("InterfaceState", "Dirty PlanningScene! Please only forward clean ones into InterfaceState.");
+}
+
+InterfaceState::InterfaceState(const planning_scene::PlanningSceneConstPtr& ps, const Priority& p)
+  : InterfaceState(ps) {
+	priority_ = p;
 }
 
 InterfaceState::InterfaceState(const InterfaceState& other)
@@ -120,18 +126,17 @@ Interface::container_type Interface::remove(iterator it) {
 }
 
 void Interface::updatePriority(InterfaceState* state, const InterfaceState::Priority& priority) {
-	if (priority != state->priority()) {
-		auto it = std::find_if(begin(), end(), [state](const InterfaceState* other) { return state == other; });
-		// state should be part of the interface
-		assert(it != end());
-		state->priority_ = priority;
+	if (priority < state->priority()) {  // only allow decreasing of priority (smaller is better)
+		auto it = std::find(begin(), end(), state);  // find iterator to state
+		assert(it != end());  // state should be part of this interface
+		state->priority_ = priority;  // update priority
 		update(it);
 		if (notify_)
 			notify_(it, true);
 	}
 }
 
-void SolutionBase::setCreator(StagePrivate* creator) {
+void SolutionBase::setCreator(Stage* creator) {
 	assert(creator_ == nullptr || creator_ == creator);  // creator must only set once
 	creator_ = creator;
 }
@@ -145,7 +150,7 @@ void SolutionBase::fillInfo(moveit_task_constructor_msgs::SolutionInfo& info, In
 	info.cost = this->cost();
 	info.comment = this->comment();
 	const Introspection* ci = introspection;
-	info.stage_id = ci ? ci->stageId(this->creator()->me()) : 0;
+	info.stage_id = ci ? ci->stageId(this->creator()) : 0;
 
 	const auto& markers = this->markers();
 	info.markers.resize(markers.size());
@@ -162,6 +167,10 @@ void SubTrajectory::fillMessage(moveit_task_constructor_msgs::Solution& msg, Int
 
 	this->end()->scene()->getPlanningSceneDiffMsg(t.scene_diff);
 	// this->end()->scene()->getPlanningSceneMsg(t.scene_diff);
+}
+
+double SubTrajectory::computeCost(const CostTerm& f, std::string& comment) const {
+	return f(*this, comment);
 }
 
 void SolutionSequence::push_back(const SolutionBase& solution) {
@@ -202,5 +211,25 @@ void SolutionSequence::fillMessage(moveit_task_constructor_msgs::Solution& msg, 
 		}
 	}
 }
+
+double SolutionSequence::computeCost(const CostTerm& f, std::string& comment) const {
+	return f(*this, comment);
+}
+
+void WrappedSolution::fillMessage(moveit_task_constructor_msgs::Solution& solution,
+                                  Introspection* introspection) const {
+	wrapped_->fillMessage(solution, introspection);
+
+	// prepend this solutions info as a SubSolution msg
+	moveit_task_constructor_msgs::SubSolution sub_msg;
+	SolutionBase::fillInfo(sub_msg.info, introspection);
+	sub_msg.sub_solution_id.push_back(introspection ? introspection->solutionId(*wrapped_) : 0);
+	solution.sub_solution.insert(solution.sub_solution.begin(), std::move(sub_msg));
+}
+
+double WrappedSolution::computeCost(const CostTerm& f, std::string& comment) const {
+	return f(*this, comment);
+}
+
 }  // namespace task_constructor
 }  // namespace moveit

@@ -40,6 +40,7 @@
 
 #include <moveit/task_constructor/stage.h>
 #include <moveit/task_constructor/storage.h>
+#include <moveit/task_constructor/cost_terms.h>
 #include <moveit/task_constructor/cost_queue.h>
 
 #include <ros/ros.h>
@@ -64,7 +65,7 @@ class StagePrivate
 
 public:
 	/// container type used to store children
-	typedef std::list<Stage::pointer> container_type;
+	using container_type = std::list<Stage::pointer>;
 	StagePrivate(Stage* me, const std::string& name);
 	virtual ~StagePrivate() = default;
 
@@ -99,7 +100,7 @@ public:
 	inline InterfaceConstPtr prevEnds() const { return prev_ends_.lock(); }
 	inline InterfaceConstPtr nextStarts() const { return next_starts_.lock(); }
 
-	/// templated access to pull/push interfaces
+	/// direction-based access to pull/push interfaces
 	inline InterfacePtr& pullInterface(Interface::Direction dir) { return dir == Interface::FORWARD ? starts_ : ends_; }
 	inline InterfacePtr pushInterface(Interface::Direction dir) {
 		return dir == Interface::FORWARD ? next_starts_.lock() : prev_ends_.lock();
@@ -139,10 +140,10 @@ public:
 	void composePropertyErrorMsg(const std::string& name, std::ostream& os);
 
 	// methods to spawn new solutions
-	void sendForward(const InterfaceState& from, InterfaceState&& to, SolutionBasePtr solution);
-	void sendBackward(InterfaceState&& from, const InterfaceState& to, SolutionBasePtr solution);
-	void spawn(InterfaceState&& state, SolutionBasePtr solution);
-	void connect(const InterfaceState& from, const InterfaceState& to, SolutionBasePtr solution);
+	void sendForward(const InterfaceState& from, InterfaceState&& to, const SolutionBasePtr& solution);
+	void sendBackward(InterfaceState&& from, const InterfaceState& to, const SolutionBasePtr& solution);
+	void spawn(InterfaceState&& state, const SolutionBasePtr& solution);
+	void connect(const InterfaceState& from, const InterfaceState& to, const SolutionBasePtr& solution);
 
 	bool storeSolution(const SolutionBasePtr& solution);
 	void newSolution(const SolutionBasePtr& solution);
@@ -154,14 +155,22 @@ public:
 		total_compute_time_ += compute_stop_time - compute_start_time;
 	}
 
+	/** compute cost for solution through configured CostTerm */
+	void computeCost(const InterfaceState& from, const InterfaceState& to, SolutionBase& solution);
+
 protected:
-	Stage* me_;  // associated/owning Stage instance
+	// associated/owning Stage instance
+	Stage* me_;
+
 	std::string name_;
 	PropertyMap properties_;
 
 	// pull interfaces, created by the stage as required
 	InterfacePtr starts_;
 	InterfacePtr ends_;
+
+	// user-configurable cost estimator
+	CostTermConstPtr cost_term_;
 
 	// The total compute time
 	std::chrono::duration<double> total_compute_time_;
@@ -227,11 +236,6 @@ public:
 
 	bool hasEndState() const;
 	const InterfaceState& fetchEndState();
-
-protected:
-	// drop states corresponding to failed (infinite-cost) trajectories
-	void dropFailedStarts(Interface::iterator state);
-	void dropFailedEnds(Interface::iterator state);
 };
 PIMPL_FUNCTIONS(PropagatingEitherWay)
 
@@ -280,7 +284,7 @@ class ConnectingPrivate : public ComputeBasePrivate
 {
 	friend class Connecting;
 
-	typedef std::pair<Interface::const_iterator, Interface::const_iterator> StatePair;
+	using StatePair = std::pair<Interface::const_iterator, Interface::const_iterator>;
 	struct StatePairLess
 	{
 		bool operator()(const StatePair& x, const StatePair& y) const {

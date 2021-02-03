@@ -66,20 +66,20 @@ QModelIndex LocalTaskModel::index(Node* n) const {
 
 	// the internal pointer refers to n
 	int row = 0;
-	auto findRow = [n, &row](const Stage& child, int /* depth */) -> bool {
+	auto find_row = [n, &row](const Stage& child, int /* depth */) -> bool {
 		if (&child == n)
 			return false;  // found, don't continue traversal
 		++row;
 		return true;
 	};
-	parent->traverseChildren(findRow);
+	parent->traverseChildren(find_row);
 	Q_ASSERT(row < parent->numChildren());
 	return createIndex(row, 0, n);
 }
 
 LocalTaskModel::LocalTaskModel(ContainerBase::pointer&& container, const planning_scene::PlanningSceneConstPtr& scene,
                                rviz::DisplayContext* display_context, QObject* parent)
-  : BaseTaskModel(scene, display_context, parent), Task("", std::move(container)) {
+  : BaseTaskModel(scene, display_context, parent), Task("", true, std::move(container)) {
 	root_ = this;
 	flags_ |= LOCAL_MODEL;
 }
@@ -134,6 +134,8 @@ Qt::ItemFlags LocalTaskModel::flags(const QModelIndex& index) const {
 	// dropping into containers is enabled
 	if (c && stage_factory_)
 		flags |= Qt::ItemIsDropEnabled;
+	if (index.column() == 0)
+		flags |= Qt::ItemIsEditable;  // name is editable
 	return flags;
 }
 
@@ -245,4 +247,4 @@ rviz::PropertyTreeModel* LocalTaskModel::getPropertyModel(const QModelIndex& ind
 	}
 	return it_inserted.first->second;
 }
-}
+}  // namespace moveit_rviz_plugin

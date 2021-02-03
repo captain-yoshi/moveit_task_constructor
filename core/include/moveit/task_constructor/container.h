@@ -49,14 +49,14 @@ class ContainerBase : public Stage
 {
 public:
 	PRIVATE_CLASS(ContainerBase)
-	typedef std::unique_ptr<ContainerBase> pointer;
+	using pointer = std::unique_ptr<ContainerBase>;
 
 	size_t numChildren() const;
 	Stage* findChild(const std::string& name) const;
 
 	/** Callback function type used by traverse functions
 	 *  The callback should return false if traversal should be stopped. */
-	typedef std::function<bool(const Stage&, unsigned int depth)> StageCallback;
+	using StageCallback = std::function<bool(const Stage&, unsigned int)>;
 	/// traverse direct children of this container, calling the callback for each of them
 	bool traverseChildren(const StageCallback& processor) const;
 	/// traverse all children of this container recursively
@@ -65,8 +65,8 @@ public:
 	void add(Stage::pointer&& stage);
 
 	virtual bool insert(Stage::pointer&& stage, int before = -1);
-	virtual bool remove(int pos);
-	virtual bool remove(Stage* child);
+	virtual Stage::pointer remove(int pos);
+	virtual Stage::pointer remove(Stage* child);
 	virtual void clear();
 
 	void reset() override;
@@ -98,17 +98,6 @@ protected:
 	/// called by a (direct) child when a new solution becomes available
 	void onNewSolution(const SolutionBase& s) override;
 
-	typedef std::function<void(const SolutionSequence::container_type& trace, double trace_accumulated_cost)>
-	    SolutionProcessor;
-
-	/// Traverse all solution pathes starting at start and going in given direction dir
-	/// until the end, i.e. until there are no more subsolutions in the given direction
-	/// For each solution path, callback the given processor passing
-	/// the full trace (from start to end, but not including start) and its accumulated costs
-	template <Interface::Direction dir>
-	void traverse(const SolutionBase& start, const SolutionProcessor& cb, SolutionSequence::container_type& trace,
-	              double trace_cost = 0);
-
 protected:
 	SerialContainer(SerialContainerPrivate* impl);
 };
@@ -121,7 +110,7 @@ class ParallelContainerBase;
  *  - Fallbacks: the children are considered in series
  *  - Merger: solutions of all children (actuating disjoint groups)
  *            are merged into a single solution for parallel execution
-*/
+ */
 class ParallelContainerBase : public ContainerBase
 {
 public:
@@ -228,5 +217,5 @@ public:
 protected:
 	WrapperBase(WrapperBasePrivate* impl, Stage::pointer&& child = Stage::pointer());
 };
-}
-}
+}  // namespace task_constructor
+}  // namespace moveit
