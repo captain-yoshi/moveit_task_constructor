@@ -136,7 +136,6 @@ void PickPlaceTask::init() {
 		t.add(std::move(applicability_filter));
 	}
 
-
 	/****************************************************
 	 *                                                  *
 	 *               Move to Pick                       *
@@ -150,57 +149,57 @@ void PickPlaceTask::init() {
 		t.add(std::move(stage));
 	}
 
-		{
-			// Sample grasp pose
-			auto stage = std::make_unique<stages::GenerateGraspPose>("generate grasp pose");
-			stage->properties().configureInitFrom(Stage::PARENT);
-			stage->properties().set("marker_ns", "grasp_pose");
-			stage->setPreGraspPose(hand_close_pose_);
-			stage->setObject(object);
-			stage->setAngleDelta(M_PI / 12);
-			stage->setMonitoredStage(current_state);  // Hook into current state
+	{
+		// Sample grasp pose
+		auto stage = std::make_unique<stages::GenerateGraspPose>("generate grasp pose");
+		stage->properties().configureInitFrom(Stage::PARENT);
+		stage->properties().set("marker_ns", "grasp_pose");
+		stage->setPreGraspPose(hand_close_pose_);
+		stage->setObject(object);
+		stage->setAngleDelta(M_PI / 12);
+		stage->setMonitoredStage(current_state_ptr);  // Hook into current state
 
-			// Compute IK
-			auto wrapper = std::make_unique<stages::ComputeIK>("grasp pose IK", std::move(stage));
-			wrapper->setMaxIKSolutions(8);
-			wrapper->setMinSolutionDistance(1.0);
-grasp_frame_transform_.translate(Eigen::Vector3d(0.1,0, 0));
-			wrapper->setIKFrame(grasp_frame_transform_, hand_frame_);
-			wrapper->properties().configureInitFrom(Stage::PARENT, { "eef", "group" });
-			wrapper->properties().configureInitFrom(Stage::INTERFACE, { "target_pose" });
-			t.add(std::move(wrapper));
-		}
+		// Compute IK
+		auto wrapper = std::make_unique<stages::ComputeIK>("grasp pose IK", std::move(stage));
+		wrapper->setMaxIKSolutions(8);
+		wrapper->setMinSolutionDistance(1.0);
+		grasp_frame_transform_.translate(Eigen::Vector3d(0.1, 0, 0));
+		wrapper->setIKFrame(grasp_frame_transform_, hand_frame_);
+		wrapper->properties().configureInitFrom(Stage::PARENT, { "eef", "group" });
+		wrapper->properties().configureInitFrom(Stage::INTERFACE, { "target_pose" });
+		t.add(std::move(wrapper));
+	}
 
 /*
 	{  // Move-to pre-grasp
-		auto stage = std::make_unique<stages::Connect>(
-		    "move to pick", stages::Connect::GroupPlannerVector{ { arm_group_name_, sampling_planner } });
-		stage->setTimeout(5.0);
-		stage->properties().configureInitFrom(Stage::PARENT);
-		t.add(std::move(stage));
+	   auto stage = std::make_unique<stages::Connect>(
+	       "move to pick", stages::Connect::GroupPlannerVector{ { arm_group_name_, sampling_planner } });
+	   stage->setTimeout(5.0);
+	   stage->properties().configureInitFrom(Stage::PARENT);
+	   t.add(std::move(stage));
 	}
 
-		{
-			// Sample grasp pose
-			auto stage = std::make_unique<stages::GenerateGraspPose>("generate grasp pose");
-			stage->properties().configureInitFrom(Stage::PARENT);
-			stage->properties().set("marker_ns", "grasp_pose");
-			stage->setPreGraspPose(hand_close_pose_);
-			stage->setObject(object);
-			stage->setAngleDelta(M_PI / 12);
-			stage->setMonitoredStage(current_state);  // Hook into current state
+	   {
+	      // Sample grasp pose
+	      auto stage = std::make_unique<stages::GenerateGraspPose>("generate grasp pose");
+	      stage->properties().configureInitFrom(Stage::PARENT);
+	      stage->properties().set("marker_ns", "grasp_pose");
+	      stage->setPreGraspPose(hand_close_pose_);
+	      stage->setObject(object);
+	      stage->setAngleDelta(M_PI / 12);
+	      stage->setMonitoredStage(current_state);  // Hook into current state
 
-			// Compute IK
-			auto wrapper = std::make_unique<stages::ComputeIK>("grasp pose IK", std::move(stage));
-			wrapper->setMaxIKSolutions(8);
-			wrapper->setMinSolutionDistance(1.0);
+	      // Compute IK
+	      auto wrapper = std::make_unique<stages::ComputeIK>("grasp pose IK", std::move(stage));
+	      wrapper->setMaxIKSolutions(8);
+	      wrapper->setMinSolutionDistance(1.0);
 grasp_frame_transform_.translate(Eigen::Vector3d(0,0, -0.1));
 
-			wrapper->setIKFrame(grasp_frame_transform_, hand_frame_);
-			wrapper->properties().configureInitFrom(Stage::PARENT, { "eef", "group" });
-			wrapper->properties().configureInitFrom(Stage::INTERFACE, { "target_pose" });
-			t.add(std::move(wrapper));
-		}
+	      wrapper->setIKFrame(grasp_frame_transform_, hand_frame_);
+	      wrapper->properties().configureInitFrom(Stage::PARENT, { "eef", "group" });
+	      wrapper->properties().configureInitFrom(Stage::INTERFACE, { "target_pose" });
+	      t.add(std::move(wrapper));
+	   }
 
 */
 #ifdef TEST
@@ -507,10 +506,10 @@ bool PickPlaceTask::execute() {
 	ROS_INFO_NAMED(LOGNAME, "Executing solution trajectory");
 	moveit_task_constructor_msgs::ExecuteTaskSolutionGoal execute_goal;
 	task_->solutions().front()->fillMessage(execute_goal.solution);
-	
-        auto test = task_->solutions().front()->start()->scene();
+
+	auto test = task_->solutions().front()->start()->scene();
 	auto a = execute_goal.solution.start_scene;
-        execute_.sendGoal(execute_goal);
+	execute_.sendGoal(execute_goal);
 	execute_.waitForResult();
 	moveit_msgs::MoveItErrorCodes execute_result = execute_.getResult()->error_code;
 

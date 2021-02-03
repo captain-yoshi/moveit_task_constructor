@@ -146,7 +146,6 @@ protected:
 		bool allow;
 	};
 	std::list<CollisionMatrixPairs> collision_matrix_edits_;
-	std::vector<moveit_msgs::CollisionObject> collision_objects_;
 	ApplyCallback callback_;
 
 protected:
