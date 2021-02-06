@@ -42,6 +42,9 @@
 #include <moveit/planning_scene/planning_scene.h>
 #include <moveit/robot_model_loader/robot_model_loader.h>
 #include <ros/ros.h>
+#include <moveit/collision_detection_bullet/collision_env_bullet.h>
+#include <moveit/collision_detection_bullet/collision_detector_allocator_bullet.h>
+#include <moveit/collision_detection/collision_tools.h>
 
 namespace moveit {
 namespace task_constructor {
@@ -66,6 +69,8 @@ bool CurrentState::canCompute() const {
 
 void CurrentState::compute() {
 	scene_ = std::make_shared<planning_scene::PlanningScene>(robot_model_);
+	// Uncomment to add exclusivly Bullet as the collision detection
+	// scene_->setActiveCollisionDetector(collision_detection::CollisionDetectorAllocatorBullet::create(), true);
 
 	ros::NodeHandle h;
 	ros::ServiceClient client = h.serviceClient<moveit_msgs::GetPlanningScene>("get_planning_scene");
