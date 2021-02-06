@@ -8,6 +8,7 @@ add_library(${PROJECT_NAME}_stages
 	${PROJECT_INCLUDE}/stages/generate_pose.h
 	${PROJECT_INCLUDE}/stages/generate_insert_pose.h
 	${PROJECT_INCLUDE}/stages/generate_grasp_pose.h
+	${PROJECT_INCLUDE}/stages/generate_custom_grasp_pose.h
 	${PROJECT_INCLUDE}/stages/generate_grasp_prism_pose.h
 	${PROJECT_INCLUDE}/stages/generate_grasp_multi_pose.h
 	${PROJECT_INCLUDE}/stages/generate_place_pose.h
@@ -34,6 +35,7 @@ add_library(${PROJECT_NAME}_stages
 	generate_grasp_prism_pose.cpp
 	generate_grasp_multi_pose.cpp
 	generate_grasp_pose.cpp
+	generate_custom_grasp_pose.cpp
 	generate_place_pose.cpp
 	compute_ik.cpp
 	passthrough.cpp

@@ -39,22 +39,26 @@
 #pragma once
 
 #include <moveit/task_constructor/stages/generate_pose.h>
+#include <Eigen/Geometry>
 
 namespace moveit {
 namespace task_constructor {
 namespace stages {
 
-class GenerateGraspPose : public GeneratePose
+class GenerateCustomGraspPose : public GeneratePose
 {
 public:
-	GenerateGraspPose(const std::string& name = "generate grasp pose");
+	GenerateCustomGraspPose(const std::string& name = "generate grasp pose");
 
 	void init(const core::RobotModelConstPtr& robot_model) override;
 	void compute() override;
 
 	void setEndEffector(const std::string& eef) { setProperty("eef", eef); }
 	void setObject(const std::string& object) { setProperty("object", object); }
+	void setObjectPose(const std::vector<Eigen::Isometry3d>& object_poses) { setProperty("object_poses", object_poses); }
+
 	void setAngleDelta(double delta) { setProperty("angle_delta", delta); }
+	// void setAngleAxis(const Eigen::Vector3d& axis) { setProperty("angle_axis", axis); }
 
 	void setPreGraspPose(const std::string& pregrasp) { properties().set("pregrasp", pregrasp); }
 	void setPreGraspPose(const moveit_msgs::RobotState& pregrasp) { properties().set("pregrasp", pregrasp); }
