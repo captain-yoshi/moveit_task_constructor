@@ -121,7 +121,7 @@ Property::Property() : Property(typeid(boost::any), "", boost::any()) {}
 
 void Property::setValue(const boost::any& value) {
 	setCurrentValue(value);
-	default_ = value_;
+	setDefaultValue(value_);
 	initialized_from_ = 0;
 }
 
