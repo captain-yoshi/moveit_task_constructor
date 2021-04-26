@@ -130,6 +130,7 @@ public:
 	}
 	/// conveniency method accepting std::string and JointModelGroup
 	void allowCollisions(const std::string& first, const moveit::core::JointModelGroup& jmg, bool allow);
+	void setCollisionObjects(const std::vector<moveit_msgs::CollisionObject>& objects);
 
 protected:
 	// list of objects to attach (true) / detach (false) to a given link

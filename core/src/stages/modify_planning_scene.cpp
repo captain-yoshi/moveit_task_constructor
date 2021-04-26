@@ -83,6 +83,10 @@ void ModifyPlanningScene::allowCollisions(const std::string& first, const moveit
 		allowCollisions(Names({ first }), links, allow);
 }
 
+void ModifyPlanningScene::setCollisionObjects(const std::vector<moveit_msgs::CollisionObject>& objects) {
+	collision_objects_.insert(collision_objects_.end(), objects.begin(), objects.end());
+}
+
 void ModifyPlanningScene::computeForward(const InterfaceState& from) {
 	sendForward(from, apply(from, false), SubTrajectory());
 }
