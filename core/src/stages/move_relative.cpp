@@ -55,6 +55,7 @@ MoveRelative::MoveRelative(const std::string& name, const solvers::PlannerInterf
 	p.property("timeout").setDefaultValue(1.0);
 	p.declare<std::string>("group", "name of planning group");
 	p.declare<geometry_msgs::PoseStamped>("ik_frame", "frame to be moved in Cartesian direction");
+	p.declare<Eigen::Isometry3d>("pose_transform", Eigen::Isometry3d::Identity(), "frame offset");
 
 	p.declare<boost::any>("direction", "motion specification");
 	// register actual types
@@ -210,6 +211,10 @@ bool MoveRelative::compute(const InterfaceState& state, planning_scene::Planning
 		try {  // try to extract Vector
 			const geometry_msgs::Vector3Stamped& target = boost::any_cast<geometry_msgs::Vector3Stamped>(direction);
 			const Eigen::Isometry3d& frame_pose = scene->getFrameTransform(target.header.frame_id);
+			Eigen::Isometry3d frame_pose_transform = props.get<Eigen::Isometry3d>("pose_transform");
+
+			frame_pose_transform = frame_pose * frame_pose_transform;
+
 			tf::vectorMsgToEigen(target.vector, linear);
 
 			// use max distance?
@@ -224,7 +229,7 @@ bool MoveRelative::compute(const InterfaceState& state, planning_scene::Planning
 				linear *= -1.0;
 
 			// compute absolute transform for link
-			linear = frame_pose.linear() * linear;
+			linear = frame_pose_transform.linear() * linear;
 			target_eigen = link_pose;
 			target_eigen.translation() += linear;
 		} catch (const boost::bad_any_cast&) {
