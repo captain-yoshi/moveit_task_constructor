@@ -47,6 +47,25 @@
 #include <moveit/macros/class_forward.h>
 
 #include <moveit_msgs/MoveItErrorCodes.h>
+// http://zguide.zeromq.org/cpp:interrupt
+#include <signal.h>
+static volatile int s_interrupted = 0;
+static void s_signal_handler(int signal_value) {
+	s_interrupted = 1;
+}
+
+static void s_catch_signals(void) {
+	struct sigaction action;
+	action.sa_handler = s_signal_handler;
+	action.sa_flags = 0;
+	sigemptyset(&action.sa_mask);
+	sigaction(SIGINT, &action, NULL);
+	sigaction(SIGTERM, &action, NULL);
+}
+static void s_unregister_signals(void) {
+	s_interrupted = 0;
+	signal(SIGINT, SIG_DFL);
+}
 
 namespace moveit {
 namespace core {

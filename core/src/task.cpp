@@ -296,6 +296,9 @@ bool Task::plan(size_t max_solutions) {
 	init();
 
 	impl->preempt_requested_ = false;
+	s_catch_signals();
+
+	impl->preempt_requested_ = false;
 	const double available_time = timeout();
 	const auto start_time = std::chrono::steady_clock::now();
 	while (!impl->preempt_requested_ && canCompute() && (max_solutions == 0 || numSolutions() < max_solutions) &&
@@ -305,7 +308,14 @@ bool Task::plan(size_t max_solutions) {
 			cb(*this);
 		if (impl->introspection_)
 			impl->introspection_->publishTaskState();
+		if (s_interrupted) {
+			s_unregister_signals();
+			preempt();
+			ROS_WARN("CTRL-C detected...");
+		}
 	}
+	s_unregister_signals();
+
 	printState();
 	return numSolutions() > 0;
 }
