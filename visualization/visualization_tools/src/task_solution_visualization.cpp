@@ -460,11 +460,6 @@ void TaskSolutionVisualization::renderWayPoint(size_t index, int previous_index)
 	moveit::core::RobotStateConstPtr robot_state;
 	planning_scene::PlanningSceneConstPtr scene;
 
-	// print robot state of waypoint 1
-	if (index == 0 && waypoint_count != 0) {
-		displaying_solution_->scene(index)->getCurrentState().printStatePositions();
-	}
-
 	if (index + 1 >= waypoint_count) {
 		if (index == 0 && waypoint_count == 0)
 			// special case: render start scene
@@ -473,9 +468,6 @@ void TaskSolutionVisualization::renderWayPoint(size_t index, int previous_index)
 			scene = displaying_solution_->scene(waypoint_count);
 		renderPlanningScene(scene);
 		robot_state.reset(new moveit::core::RobotState(scene->getCurrentState()));
-
-		// print robot state of start scene and end state
-		robot_state->printStatePositions();
 	} else {
 		auto idx_pair = displaying_solution_->indexPair(index);
 		scene = displaying_solution_->scene(idx_pair);
@@ -493,6 +485,8 @@ void TaskSolutionVisualization::renderWayPoint(size_t index, int previous_index)
 		}
 		robot_state = displaying_solution_->getWayPointPtr(idx_pair);
 	}
+	// Print robot state for each waypoints whe using the slider
+	robot_state->printStatePositions();
 
 	QColor attached_color = attached_body_color_property_->getColor();
 	std_msgs::ColorRGBA color;
