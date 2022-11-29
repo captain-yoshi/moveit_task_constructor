@@ -230,6 +230,16 @@ void ComputeIK::compute() {
 	if (upstream_solutions_.empty())
 		return;
 
+	// NOTE default behavior
+	// compute_();
+
+	// NOTE This will compute every solutions
+	while (!upstream_solutions_.empty()) {
+		compute_();
+	}
+}
+
+void ComputeIK::compute_() {
 	const SolutionBase& s = *upstream_solutions_.pop();
 
 	// -1 TODO: this should not be necessary in my opinion: Why do you think so?
