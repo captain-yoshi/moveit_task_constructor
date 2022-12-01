@@ -43,7 +43,7 @@
 #include <rviz/properties/property_tree_model.h>
 #include <rviz/properties/string_property.h>
 #include <rviz/properties/float_property.h>
-#include <rviz/properties/vector_property.h>
+//#include <rviz/properties/vector_property.h>
 
 #include <geometry_msgs/Vector3Stamped.h>
 
@@ -76,14 +76,16 @@ static rviz::Property* floatFactory(const QString& name, mtc::Property& mtc_prop
 
 rviz::Property* vector3Factory(const QString& name, mtc::Property& mtc_prop,
                                const planning_scene::PlanningScene* /*scene*/, rviz::DisplayContext* /*context*/) {
-	auto value{ mtc_prop.defined() ? mtc_prop.value<geometry_msgs::Vector3Stamped>() : geometry_msgs::Vector3Stamped{} };
+	// auto value{ mtc_prop.defined() ? mtc_prop.value<geometry_msgs::Vector3Stamped>() : geometry_msgs::Vector3Stamped{}
+	// };
 
-	auto* rviz_prop =
-	    new rviz::VectorProperty(name, Ogre::Vector3::ZERO, QString::fromStdString(mtc_prop.description()));
-	rviz_prop->setVector(Ogre::Vector3{ static_cast<Ogre::Real>(value.vector.x), static_cast<Ogre::Real>(value.vector.y),
-	                                    static_cast<Ogre::Real>(value.vector.z) });
+	// auto* rviz_prop =
+	//    new rviz::VectorProperty(name, Ogre::Vector3::ZERO, QString::fromStdString(mtc_prop.description()));
+	// rviz_prop->setVector(Ogre::Vector3{ static_cast<Ogre::Real>(value.vector.x),
+	// static_cast<Ogre::Real>(value.vector.y),
+	//                                    static_cast<Ogre::Real>(value.vector.z) });
 
-	return rviz_prop;
+	return nullptr;
 }
 
 }  // namespace
