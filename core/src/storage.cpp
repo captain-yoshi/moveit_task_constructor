@@ -210,7 +210,7 @@ void SolutionBase::fillInfo(moveit_task_constructor_msgs::SolutionInfo& info, In
 	info.comment = this->comment();
 	const Introspection* ci = introspection;
 	info.stage_id = ci ? ci->stageId(this->creator()) : 0;
-
+	creator_->properties().fillMsgs(info.properties);
 	const auto& markers = this->markers();
 	info.markers.resize(markers.size());
 	std::copy(markers.begin(), markers.end(), info.markers.begin());
