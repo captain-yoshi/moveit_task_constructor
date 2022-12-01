@@ -242,6 +242,9 @@ moveit::core::MoveItErrorCode Task::plan(size_t max_solutions) {
 		return numSolutions() > 0 ? moveit::core::MoveItErrorCode::SUCCESS : error_code;
 	};
 	impl->preempt_requested_ = false;
+	s_catch_signals();
+
+	impl->preempt_requested_ = false;
 	const double available_time = timeout();
 	const auto start_time = std::chrono::steady_clock::now();
 	while (canCompute() && (max_solutions == 0 || numSolutions() < max_solutions)) {
@@ -254,7 +257,14 @@ moveit::core::MoveItErrorCode Task::plan(size_t max_solutions) {
 			cb(*this);
 		if (impl->introspection_)
 			impl->introspection_->publishTaskState();
+		if (s_interrupted) {
+			s_unregister_signals();
+			preempt();
+			ROS_WARN("CTRL-C detected...");
+		}
 	};
+	s_unregister_signals();
+
 	return success_or(moveit::core::MoveItErrorCode::PLANNING_FAILED);
 }
 
