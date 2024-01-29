@@ -90,6 +90,14 @@ const ContainerBase* TaskPrivate::stages() const {
 	return children().empty() ? nullptr : static_cast<ContainerBase*>(children().front().get());
 }
 
+const ContainerBase* Task::stages(uint32_t stage_id) const {
+	int64_t id = stage_id - 2;
+	if (id > 0 && id < stage_vec.size()) {
+		return stage_vec[id];
+	}
+	return nullptr;
+}
+
 Task::Task(const std::string& ns, bool introspection, ContainerBase::pointer&& container)
   : WrapperBase(new TaskPrivate(this, ns), std::move(container)) {
 	setTimeout(std::numeric_limits<double>::max());
@@ -141,6 +149,7 @@ void Task::loadRobotModel(const std::string& robot_description) {
 }
 
 void Task::add(Stage::pointer&& stage) {
+	stage_vec.push_back(static_cast<ContainerBase*>(stage.get()));
 	stages()->add(std::move(stage));
 }
 
