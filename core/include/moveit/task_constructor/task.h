@@ -161,7 +161,7 @@ protected:
 	void compute() override;
 	void onNewSolution(const SolutionBase& s) override;
 
-	std::vector<ContainerBase*> stage_vec;
+	std::vector<const ContainerBase*> stage_vec;
 
 private:
 	using WrapperBase::init;
