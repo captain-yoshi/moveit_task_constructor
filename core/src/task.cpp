@@ -148,8 +148,20 @@ void Task::loadRobotModel(const std::string& robot_description) {
 		throw Exception("Task failed to construct RobotModel");
 }
 
+void Task::compute_stage_id() {
+	auto stage_cb = [&](const moveit::task_constructor::Stage& stage, unsigned int depth) -> bool {
+		std::cout << "stage_name: " << stage.name() << std::endl;
+		std::cout << "stage_id: " << stage_vec.size() << std::endl;
+		std::cout << "----------" << std::endl;
+		stage_vec.push_back(static_cast<const ContainerBase*>(&stage));
+
+		return true;
+	};
+
+	stages()->traverseRecursively(stage_cb);
+}
+
 void Task::add(Stage::pointer&& stage) {
-	stage_vec.push_back(static_cast<ContainerBase*>(stage.get()));
 	stages()->add(std::move(stage));
 }
 
