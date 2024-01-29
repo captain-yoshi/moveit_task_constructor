@@ -94,6 +94,7 @@ public:
 	/// load robot model from given parameter
 	void loadRobotModel(const std::string& robot_description = "robot_description");
 
+	void compute_stage_id();
 	void add(Stage::pointer&& stage);
 	void insert(Stage::pointer&& stage, int before = -1) override;
 	void clear() final;
