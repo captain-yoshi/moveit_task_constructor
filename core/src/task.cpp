@@ -91,9 +91,8 @@ const ContainerBase* TaskPrivate::stages() const {
 }
 
 const ContainerBase* Task::stages(uint32_t stage_id) const {
-	int64_t id = stage_id - 2;
-	if (id > 0 && id < stage_vec.size()) {
-		return stage_vec[id];
+	if (stage_id >= 0 && stage_id < stage_vec.size()) {
+		return stage_vec[stage_id];
 	}
 	return nullptr;
 }
