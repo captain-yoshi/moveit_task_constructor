@@ -161,6 +161,13 @@ bool PickPlaceTask::init() {
 	auto sampling_planner = std::make_shared<solvers::PipelinePlanner>();
 	sampling_planner->setProperty("goal_joint_tolerance", 1e-5);
 
+	// Motion planner
+	auto pilz_planner_lin =
+	    std::make_shared<moveit::task_constructor::solvers::PipelinePlanner>("pilz_industrial_motion_planner");
+	pilz_planner_lin->setPlannerId("LIN");
+	pilz_planner_lin->setProperty("max_velocity_scaling_factor", 0.1);
+	pilz_planner_lin->setProperty("max_acceleration_scaling_factor", 0.25);
+
 	// Cartesian planner
 	auto cartesian_planner = std::make_shared<solvers::CartesianPath>();
 	cartesian_planner->setMaxVelocityScalingFactor(1.0);
@@ -216,7 +223,7 @@ bool PickPlaceTask::init() {
 	 ***************************************************/
 	{  // Move-to pre-grasp
 		auto stage = std::make_unique<stages::Connect>(
-		    "move to pick", stages::Connect::GroupPlannerVector{ { arm_group_name_, sampling_planner } });
+		    "move to pick", stages::Connect::GroupPlannerVector{ { arm_group_name_, pilz_planner_lin } });
 		stage->setTimeout(5.0);
 		stage->properties().configureInitFrom(Stage::PARENT);
 		t.add(std::move(stage));
