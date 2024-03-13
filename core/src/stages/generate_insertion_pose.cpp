@@ -53,8 +53,20 @@ GenerateInsertionPose::GenerateInsertionPose(const std::string& name) : Generate
 	auto& p = properties();
 	p.declare<std::string>("eef", "name of end-effector");
 	p.declare<std::string>("object");
+	p.declare<geometry_msgs::Pose>("object_offset", "frame offset wrt. the object");
 	p.declare<double>("angle_delta", 0.1, "angular steps (rad)");
 	p.declare<Eigen::Vector3d>("rotation_axis", Eigen::Vector3d::UnitZ(), "rotate object pose about given axis");
+
+	p.set("object_offset", [] {
+		geometry_msgs::Pose pose;
+		pose.orientation.w = 1.0;
+		return pose;
+	}());
+}
+
+void GenerateInsertionPose::setObjectOffset(const Eigen::Isometry3d& object_offset) {
+	auto object_offset_msg = tf2::toMsg(object_offset);
+	setObjectOffset(object_offset_msg);
 }
 
 void GenerateInsertionPose::init(const core::RobotModelConstPtr& robot_model) {
@@ -112,12 +124,19 @@ void GenerateInsertionPose::compute() {
 
 	geometry_msgs::PoseStamped target_pose_msg;
 	target_pose_msg.header.frame_id = props.get<std::string>("object");
+
+	geometry_msgs::Pose object_offset_msg = props.get<geometry_msgs::Pose>("object_offset");
 	Eigen::Vector3d rotation_axis = props.get<Eigen::Vector3d>("rotation_axis");
+
+	Eigen::Isometry3d object_offset;
+	tf2::fromMsg(object_offset_msg, object_offset);
 
 	double current_angle = 0.0;
 	while (current_angle < 2. * M_PI && current_angle > -2. * M_PI) {
 		// rotate object pose about z-axis
 		Eigen::Isometry3d target_pose(Eigen::AngleAxisd(current_angle, rotation_axis));
+		target_pose = object_offset * target_pose;
+
 		current_angle += props.get<double>("angle_delta");
 
 		InterfaceState state(scene);

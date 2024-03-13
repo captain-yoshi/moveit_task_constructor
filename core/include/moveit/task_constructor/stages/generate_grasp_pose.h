@@ -54,6 +54,8 @@ public:
 
 	void setEndEffector(const std::string& eef) { setProperty("eef", eef); }
 	void setObject(const std::string& object) { setProperty("object", object); }
+	void setObjectOffset(const geometry_msgs::Pose& object_offset) { setProperty("object_offset", object_offset); }
+	void setObjectOffset(const Eigen::Isometry3d& object_offset);
 	void setAngleDelta(double delta) { setProperty("angle_delta", delta); }
 	void setRotationAxis(const Eigen::Vector3d& axis) { setProperty("rotation_axis", axis); }
 
