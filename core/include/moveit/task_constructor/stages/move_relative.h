@@ -93,6 +93,11 @@ public:
 	/// move specified joint variables by given amount
 	void setDirection(const std::map<std::string, double>& joint_deltas) { setProperty("direction", joint_deltas); }
 
+	void setDirectionOffset(const geometry_msgs::Pose& direction_offset) {
+		setProperty("direction_offset", direction_offset);
+	}
+	void setDirectionOffset(const Eigen::Isometry3d& direction_offset);
+
 protected:
 	// return false if trajectory shouldn't be stored
 	bool compute(const InterfaceState& state, planning_scene::PlanningScenePtr& scene, SubTrajectory& trajectory,

@@ -55,8 +55,9 @@ MoveRelative::MoveRelative(const std::string& name, const solvers::PlannerInterf
 	p.property("timeout").setDefaultValue(1.0);
 	p.declare<std::string>("group", "name of planning group");
 	p.declare<geometry_msgs::PoseStamped>("ik_frame", "frame to be moved in Cartesian direction");
-
 	p.declare<boost::any>("direction", "motion specification");
+	p.declare<geometry_msgs::Pose>("direction_offset", "frame offset wrt. the direction frame_id");
+
 	// register actual types
 	PropertySerializer<geometry_msgs::TwistStamped>();
 	PropertySerializer<geometry_msgs::Vector3Stamped>();
@@ -65,6 +66,12 @@ MoveRelative::MoveRelative(const std::string& name, const solvers::PlannerInterf
 
 	p.declare<moveit_msgs::Constraints>("path_constraints", moveit_msgs::Constraints(),
 	                                    "constraints to maintain during trajectory");
+
+	p.set("direction_offset", [] {
+		geometry_msgs::Pose pose;
+		pose.orientation.w = 1.0;
+		return pose;
+	}());
 }
 
 void MoveRelative::setIKFrame(const Eigen::Isometry3d& pose, const std::string& link) {
@@ -72,6 +79,11 @@ void MoveRelative::setIKFrame(const Eigen::Isometry3d& pose, const std::string& 
 	pose_msg.header.frame_id = link;
 	pose_msg.pose = tf2::toMsg(pose);
 	setIKFrame(pose_msg);
+}
+
+void MoveRelative::setDirectionOffset(const Eigen::Isometry3d& direction_offset) {
+	auto direction_offset_msg = tf2::toMsg(direction_offset);
+	setDirectionOffset(direction_offset_msg);
 }
 
 void MoveRelative::init(const moveit::core::RobotModelConstPtr& robot_model) {
@@ -211,9 +223,16 @@ bool MoveRelative::compute(const InterfaceState& state, planning_scene::Planning
 		double linear_norm = 0.0, angular_norm = 0.0;
 		Eigen::Isometry3d target_eigen;
 
+		geometry_msgs::Pose direction_offset_msg = props.get<geometry_msgs::Pose>("direction_offset");
+
+		Eigen::Isometry3d direction_offset;
+		tf2::fromMsg(direction_offset_msg, direction_offset);
+
 		try {  // try to extract Twist
 			const geometry_msgs::TwistStamped& target = boost::any_cast<geometry_msgs::TwistStamped>(direction);
 			const Eigen::Isometry3d& frame_pose = scene->getFrameTransform(target.header.frame_id);
+			Eigen::Isometry3d frame_pose_offset = frame_pose * direction_offset;
+
 			tf2::fromMsg(target.twist.linear, linear);
 			tf2::fromMsg(target.twist.angular, angular);
 
@@ -245,8 +264,8 @@ bool MoveRelative::compute(const InterfaceState& state, planning_scene::Planning
 
 			// compute target transform for ik_frame applying motion transform of twist
 			// linear+angular are expressed w.r.t. model frame and thus we need left-multiplication
-			linear = frame_pose.linear() * linear;
-			angular = frame_pose.linear() * angular;
+			linear = frame_pose_offset.linear() * linear;
+			angular = frame_pose_offset.linear() * angular;
 			auto R = Eigen::AngleAxisd(angular_norm, angular);  // NOLINT(readability-identifier-naming)
 			auto p = ik_pose_world.translation();
 			target_eigen = Eigen::Translation3d(linear + p - R * p) * (R * ik_pose_world);
@@ -257,6 +276,8 @@ bool MoveRelative::compute(const InterfaceState& state, planning_scene::Planning
 		try {  // try to extract Vector
 			const geometry_msgs::Vector3Stamped& target = boost::any_cast<geometry_msgs::Vector3Stamped>(direction);
 			const Eigen::Isometry3d& frame_pose = scene->getFrameTransform(target.header.frame_id);
+			Eigen::Isometry3d frame_pose_offset = frame_pose * direction_offset;
+
 			tf2::fromMsg(target.vector, linear);
 
 			// use max distance?
@@ -271,7 +292,7 @@ bool MoveRelative::compute(const InterfaceState& state, planning_scene::Planning
 				linear *= -1.0;
 
 			// compute target transform for ik_frame applying delta transform of twist
-			linear = frame_pose.linear() * linear;
+			linear = frame_pose_offset.linear() * linear;
 			target_eigen = Eigen::Translation3d(linear) * ik_pose_world;
 		} catch (const boost::bad_any_cast&) {
 			solution.markAsFailure(std::string("invalid direction type: ") + direction.type().name());
