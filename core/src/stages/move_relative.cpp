@@ -63,6 +63,7 @@ MoveRelative::MoveRelative(const std::string& name, const solvers::PlannerInterf
 	PropertySerializer<geometry_msgs::Vector3Stamped>();
 	p.declare<double>("min_distance", -1.0, "minimum distance to move");
 	p.declare<double>("max_distance", 0.0, "maximum distance to move");
+	p.declare<double>("min_distance_threshold", 1e-6, "accept min_distance if within tolerance ");
 
 	p.declare<moveit_msgs::Constraints>("path_constraints", moveit_msgs::Constraints(),
 	                                    "constraints to maintain during trajectory");
@@ -197,6 +198,10 @@ bool MoveRelative::compute(const InterfaceState& state, planning_scene::Planning
 
 	double max_distance = props.get<double>("max_distance");
 	double min_distance = props.get<double>("min_distance");
+	min_distance -= props.get<double>("min_distance_threshold");
+	if (min_distance < 0.0)
+		min_distance = 0.0;
+
 	const auto& path_constraints = props.get<moveit_msgs::Constraints>("path_constraints");
 
 	robot_trajectory::RobotTrajectoryPtr robot_trajectory;
