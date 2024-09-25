@@ -57,7 +57,7 @@ public:
 	void setIKFrame(const Eigen::Isometry3d& pose, const std::string& link);
 	void setIKFrame(const std::string& link) { setIKFrame(Eigen::Isometry3d::Identity(), link); }
 
-	void setStepSize(double step_size) { setProperty("step_size", step_size); }
+	void setStepSize(const moveit::core::MaxEEFStep& step_size) { setProperty("step_size", step_size); }
 	void setPrecision(const moveit::core::CartesianPrecision& precision) { setProperty("precision", precision); }
 	template <typename T = float>
 	void setJumpThreshold(double) {
