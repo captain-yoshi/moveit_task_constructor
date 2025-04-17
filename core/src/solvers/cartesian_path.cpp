@@ -128,7 +128,20 @@ PlannerInterface::Result CartesianPath::plan(const planning_scene::PlanningScene
 		                          props.get<double>("max_acceleration_scaling_factor"));
 
 	if (achieved_fraction < props.get<double>("min_fraction")) {
-		return { false, "CartesianPath: min_fraction not met. Achieved: " + std::to_string(achieved_fraction) };
+		// get last waypoint
+		std::string extra_comment;
+		if (!trajectory.empty()) {
+			const auto& waypoint = trajectory[trajectory.size() - 1];
+			if (from->isStateColliding(*waypoint, jmg->getName()))
+				extra_comment += "\nWaypoint is in collision!";
+
+			double margin = -0.1;  // ~6 degrees
+			if (waypoint->satisfiesBounds(jmg, margin))
+				extra_comment += "\nWaypoint is close to bounds margin: " + std::to_string(margin);
+		}
+
+		return { false,
+			      "CartesianPath: min_fraction not met. Achieved: " + std::to_string(achieved_fraction) + extra_comment };
 	}
 	return { true, "achieved fraction: " + std::to_string(achieved_fraction) };
 }
