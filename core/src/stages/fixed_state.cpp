@@ -31,7 +31,6 @@
  *  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  *********************************************************************/
-
 /* Authors: Robert Haschke */
 
 #include <moveit/task_constructor/stages/fixed_state.h>
@@ -64,7 +63,8 @@ bool FixedState::canCompute() const {
 
 void FixedState::compute() {
 	SubTrajectory trajectory;
-	if (!properties().get<bool>("ignore_collisions") && scene_->isStateColliding()) {
+
+	if (!properties().get<bool>("ignore_collisions") && scene_->isStateColliding("", true)) {
 		trajectory.markAsFailure("in collision");
 	}
 
