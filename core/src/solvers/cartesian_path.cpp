@@ -106,7 +106,8 @@ PlannerInterface::Result CartesianPath::plan(const planning_scene::PlanningScene
 	                                       const double* joint_positions) {
 		state->setJointGroupPositions(jmg, joint_positions);
 		state->update();
-		return !sandbox_scene->isStateColliding(const_cast<const moveit::core::RobotState&>(*state), jmg->getName()) &&
+		return !sandbox_scene->isStateColliding(const_cast<const moveit::core::RobotState&>(*state), jmg->getName(),
+		                                        true) &&
 		       kcs.decide(*state).satisfied;
 	};
 
